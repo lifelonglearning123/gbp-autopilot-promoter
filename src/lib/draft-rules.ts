@@ -8,6 +8,7 @@ type ResearchFacts = {
   case_study_clients?: { name: string; town: string | null }[];
 };
 
+/** town "" (or only a country): Google is searched by the name alone. */
 export type SampleTarget = { kind: "own" | "client"; name: string; town: string };
 
 /** "Leeds, United Kingdom" → "Leeds". */
@@ -28,6 +29,23 @@ export function pickSampleTarget(agencyName: string, facts: ResearchFacts): Samp
   const own = town ? ({ kind: "own", name: agencyName, town } as const) : null;
   const viaClient = client ? ({ kind: "client", name: client.name.trim(), town: townOf(client.town)! } as const) : null;
   return facts.best_sample === "client" ? (viaClient ?? own) : (own ?? viaClient);
+}
+
+/** "Leeds, West Yorkshire, UK" → "UK"; null when the location is only a town. */
+export function countryOf(location: string | null | undefined): string | null {
+  const parts = (location ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts[parts.length - 1] : null;
+}
+
+/**
+ * Every business worth trying, best first: the research's pick, then the
+ * agency's own listing searched by name alone (with its country if known),
+ * which finds agencies whose site never says where they are.
+ */
+export function sampleTargets(agencyName: string, facts: ResearchFacts, country?: string | null): SampleTarget[] {
+  const first = pickSampleTarget(agencyName, facts);
+  const byName: SampleTarget = { kind: "own", name: agencyName, town: countryOf(facts.location) ?? country?.trim() ?? "" };
+  return first && first.kind === "own" && first.town === byName.town ? [first] : [first, byName].filter((t): t is SampleTarget => !!t);
 }
 
 const LEGAL = new Set(["llc", "inc", "ltd", "limited", "co", "corp", "plc", "the", "and", "of"]);

@@ -8,7 +8,7 @@ import { signedByPlatform } from "../src/lib/platform";
 import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
-import { draftProblems, pickSampleTarget, sameBusiness, townOf } from "../src/lib/draft-rules";
+import { countryOf, draftProblems, pickSampleTarget, sameBusiness, sampleTargets, townOf } from "../src/lib/draft-rules";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -119,6 +119,16 @@ check("a draft carries the sample link once, nothing else, and stays short and c
   assert.ok(draftProblems({ ...good, body: `${url} ${"word ".repeat(140)}` }, url).some((p) => p.includes("words")));
 });
 
+check("with no town to go on, the agency is looked up on Google by name (and country)", () => {
+  assert.deepEqual(sampleTargets("Acme", { best_sample: "own", location: null }, "US"), [{ kind: "own", name: "Acme", town: "US" }]);
+  assert.deepEqual(sampleTargets("Acme", { best_sample: "own", location: "Leeds, UK" }), [
+    { kind: "own", name: "Acme", town: "Leeds" },
+    { kind: "own", name: "Acme", town: "UK" },
+  ]);
+  assert.equal(sampleTargets("Acme", { best_sample: "client", case_study_clients: [{ name: "Bob's", town: "York" }] })[0].kind, "client");
+  assert.equal(countryOf("Austin, Texas, USA"), "USA");
+  assert.equal(countryOf("Austin"), null);
+});
 check("an audit of a different business than asked for is caught", () => {
   assert.equal(sameBusiness("Digital Marketing Inc.", "Digital"), false);
   assert.equal(sameBusiness("PearPixels LLC", "Pearpixels LLC"), true);

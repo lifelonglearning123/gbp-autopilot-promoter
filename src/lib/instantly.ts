@@ -129,7 +129,7 @@ export async function createFirstEmailCampaign(name: string, accounts: string[])
         },
       ],
     },
-    sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body: "{{body_html}}" }] }] }],
+    sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body: "{{body_html}}" }] }] }], // sign-off: setCampaignCopy
     email_list: accounts,
     daily_limit: 30,
     stop_on_reply: true,
@@ -137,6 +137,28 @@ export async function createFirstEmailCampaign(name: string, accounts: string[])
     open_tracking: false,
     link_tracking: false,
     insert_unsubscribe_header: true,
+  });
+}
+
+/**
+ * The email Instantly sends: the lead's own draft, then the same sign-off,
+ * legal line and opt-out under every one (a cold email must say who sent it
+ * and how to stop more).
+ */
+export function campaignBody(signoff: string, legal: string): string {
+  return [
+    "{{body_html}}",
+    "",
+    bodyHtml(signoff),
+    "",
+    bodyHtml(legal),
+    'Not relevant? Reply "remove" and I will take you off this list straight away.',
+  ].join("<br/>");
+}
+
+export async function setCampaignCopy(campaignId: string, body: string) {
+  return api<{ id: string }>("PATCH", `/campaigns/${campaignId}`, {
+    sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body }] }] }],
   });
 }
 

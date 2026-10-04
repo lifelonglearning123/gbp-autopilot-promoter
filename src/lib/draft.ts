@@ -2,7 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { agencies, agencyResearch, contacts, messages, samples } from "@/db/schema";
 import { env } from "@/env";
-import { draftProblems, pickSampleTarget, sameBusiness } from "./draft-rules";
+import { draftProblems, sameBusiness, sampleTargets, type SampleTarget } from "./draft-rules";
 import { askJson } from "./openrouter";
 import { makeSample, PlatformError, type Sample } from "./platform";
 import type { Facts } from "./research";
@@ -69,32 +69,39 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
   if (!research) return { ok: false, why: "not researched" };
   const facts = research.facts as unknown as Facts;
 
-  const target = pickSampleTarget(agency.name, facts);
-  if (!target) {
-    await setStatus(agency.id, "no_sample");
-    return { ok: false, why: "nothing to audit" };
+  // Try each business in turn until Google finds the one we asked for.
+  let sample: Sample | null = null;
+  let target: SampleTarget | null = null;
+  const misses: string[] = [];
+  for (const t of sampleTargets(agency.name, facts, agency.country)) {
+    try {
+      const s = await makeSample({
+        name: t.name,
+        town: t.town,
+        brand: { name: agency.name, logoUrl: agency.branding?.logoUrl, colour: agency.branding?.colour },
+        externalRef: contact.id,
+        contact: { email: contact.email, fullName: [contact.firstName, contact.lastName].filter(Boolean).join(" ") || undefined },
+      });
+      // Google matched a different business: an email about it would be wrong.
+      if (sameBusiness(t.name, s.result.title)) {
+        sample = s;
+        target = t;
+        break;
+      }
+      misses.push(`found "${s.result.title}", not "${t.name}"`);
+    } catch (e) {
+      // A 4xx about the business (not found, several match) is the agency's: try the next.
+      // Anything else is the platform's (off, down, key refused): stop and leave it to retry.
+      const status = e instanceof PlatformError ? e.status : 0;
+      if (!(status >= 400 && status < 500 && ![401, 403, 429].includes(status))) {
+        return { ok: false, why: `sample: ${e instanceof Error ? e.message : e}` };
+      }
+      misses.push(`${t.name}${t.town ? `, ${t.town}` : ""}: ${e instanceof Error ? e.message.split(".")[0] : e}`);
+    }
   }
-
-  let sample: Sample;
-  try {
-    sample = await makeSample({
-      name: target.name,
-      town: target.town,
-      brand: { name: agency.name, logoUrl: agency.branding?.logoUrl, colour: agency.branding?.colour },
-      externalRef: contact.id,
-      contact: { email: contact.email, fullName: [contact.firstName, contact.lastName].filter(Boolean).join(" ") || undefined },
-    });
-  } catch (e) {
-    // A 4xx about the business (not found on Maps) is the agency's: set it aside.
-    // Anything else is the platform's (off, down, key refused): leave it to retry.
-    const status = e instanceof PlatformError ? e.status : 0;
-    if (status >= 400 && status < 500 && ![401, 403, 429].includes(status)) await setStatus(agency.id, "no_sample");
-    return { ok: false, why: `sample: ${e instanceof Error ? e.message : e}` };
-  }
-  if (!sameBusiness(target.name, sample.result.title)) {
-    // Google matched a different business: an email about it would be wrong.
+  if (!sample || !target) {
     await setStatus(agency.id, "no_sample");
-    return { ok: false, why: `sample: found "${sample.result.title}", not "${target.name}"` };
+    return { ok: false, why: `no audit: ${misses.join("; ")}` };
   }
   await db()
     .insert(samples)

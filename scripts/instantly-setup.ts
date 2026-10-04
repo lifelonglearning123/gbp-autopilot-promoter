@@ -7,6 +7,7 @@
  *   npm run instantly:setup
  *   npm run instantly:setup -- --accounts       (the campaign exists: re-set its mailboxes and tag)
  *   npm run instantly:setup -- --webhook-only   (the campaign exists: add the webhook)
+ *   npm run instantly:setup -- --copy           (the campaign exists: set the sign-off and legal line)
  */
 import { env } from "../src/env";
 import {
@@ -14,12 +15,23 @@ import {
   createWebhook,
   ourTagId,
   sendingAccounts,
+  campaignBody,
   setCampaignAccounts,
+  setCampaignCopy,
   tagCampaign,
 } from "../src/lib/instantly";
 
 async function main() {
   let campaignId = env.INSTANTLY_CAMPAIGN_ID;
+  if (process.argv.includes("--copy")) {
+    if (!campaignId) throw new Error("No INSTANTLY_CAMPAIGN_ID.");
+    if (!env.SENDER_LEGAL) throw new Error("Set SENDER_LEGAL first: the company that sends, and its address.");
+    // .env files hold "\n" as two characters: make them line breaks.
+    const lines = (s: string) => s.replace(/\\n/g, "\n");
+    await setCampaignCopy(campaignId, campaignBody(lines(env.SENDER_SIGNOFF), lines(env.SENDER_LEGAL)));
+    console.log("Campaign email set: each draft, then the sign-off, legal line and opt-out.");
+    process.exit(0);
+  }
   const accountsOnly = process.argv.includes("--accounts");
   if (!process.argv.includes("--webhook-only")) {
     if (campaignId && !accountsOnly) {

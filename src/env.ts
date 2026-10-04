@@ -36,6 +36,9 @@ const schema = z.object({
   INSTANTLY_API_KEY: optional,
   /** Our tag in the shared Instantly workspace: only mailboxes carrying it are ours. */
   INSTANTLY_TAG: z.string().default("Signal"),
+  /** Who sends, under every email: name and role, then the legal line (company, address). */
+  SENDER_SIGNOFF: z.string().default("Chao\\nFounder, GBP Autopilot"),
+  SENDER_LEGAL: optional,
   /** The campaign drafts are pushed into (npm run instantly:setup makes it). */
   INSTANTLY_CAMPAIGN_ID: optional,
   /** Our own shared secret: Instantly sends it as a header on every webhook. */
