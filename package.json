@@ -1,0 +1,33 @@
+{
+  "name": "gbp-autopilot-promoter",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "verify": "tsx scripts/verify.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
+    "import:ghl": "dotenv -e .env.local -- tsx scripts/import-ghl.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "next": "16.2.4",
+    "postgres": "^3.4.9",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "dotenv-cli": "^11.0.0",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  }
+}
