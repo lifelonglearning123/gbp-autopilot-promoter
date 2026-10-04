@@ -152,6 +152,11 @@ export const messages = pgTable(
     subject: text("subject"),
     body: text("body").notNull(),
     guardrail: jsonb("guardrail").$type<{ ok: boolean; notes: string[] }>(),
+    /** Handed to Instantly as a lead in this campaign; Instantly decides when it goes. */
+    instantlyCampaignId: text("instantly_campaign_id"),
+    instantlyLeadId: text("instantly_lead_id"),
+    pushedAt: timestamp("pushed_at", { withTimezone: true }),
+    /** Set by Instantly's email_sent event, not when pushed. */
     sentAt: timestamp("sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { env } from "@/env";
 
 /**
@@ -49,4 +50,107 @@ export async function verificationStatus(email: string): Promise<Verified> {
   });
   if (!res.ok) throw new Error(`Instantly verification status ${res.status}`);
   return foldVerdict(await res.json());
+}
+
+/* ── Sending ─────────────────────────────────────────────────────────────── */
+
+async function api<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: headers(),
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { message?: string; error?: string };
+  if (!res.ok) throw new Error(`Instantly ${method} ${path.split("?")[0]} ${res.status}: ${data.message ?? data.error ?? ""}`);
+  return data;
+}
+
+/** A draft's plain text as the HTML Instantly sends: escaped, paragraphs and line breaks kept. */
+export function bodyHtml(text: string): string {
+  const esc = text.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return esc.replace(/\r\n/g, "\n").replace(/\n/g, "<br/>");
+}
+
+/** Does a webhook carry our secret? Instantly signs nothing, so we set the header ourselves. */
+export function webhookSecretOk(header: string | null, secret: string | undefined): boolean {
+  if (!secret || !header) return false;
+  const a = Buffer.from(header);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export const WEBHOOK_HEADER = "x-promoter-secret";
+
+/** The sending accounts that can send now (status 1). */
+export async function sendingAccounts(): Promise<string[]> {
+  const body = await api<{ items?: { email: string; status?: number }[] }>("GET", "/accounts?limit=100");
+  return (body.items ?? []).filter((a) => a.status === 1).map((a) => a.email);
+}
+
+/**
+ * One campaign for first emails. Each lead carries its own written email as
+ * custom variables, so the sequence is just {{subject}} and {{body_html}}.
+ * Created as a draft: nothing is sent until it is activated in Instantly.
+ * Weekdays 9-5 UK time (Instantly has no Europe/London; Isle of Man keeps UK time).
+ */
+export async function createFirstEmailCampaign(name: string, accounts: string[]): Promise<{ id: string; status: number }> {
+  return api("POST", "/campaigns", {
+    name,
+    campaign_schedule: {
+      schedules: [
+        {
+          name: "UK weekdays",
+          timing: { from: "09:00", to: "17:00" },
+          days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+          timezone: "Europe/Isle_of_Man",
+        },
+      ],
+    },
+    sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body: "{{body_html}}" }] }] }],
+    email_list: accounts,
+    daily_limit: 30,
+    stop_on_reply: true,
+    stop_for_company: true,
+    open_tracking: false,
+    link_tracking: false,
+    insert_unsubscribe_header: true,
+  });
+}
+
+export type NewLead = {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  website?: string;
+  custom_variables: Record<string, string>;
+};
+
+/** Up to 1000 leads into a campaign. Anyone already anywhere in the workspace is skipped. */
+export async function addLeads(campaignId: string, leads: NewLead[]) {
+  return api<{
+    leads_uploaded?: number;
+    in_blocklist?: number;
+    skipped_count?: number;
+    duplicated_leads?: number;
+    created_leads?: { index: number; id: string; email: string }[];
+  }>("POST", "/leads/add", { campaign_id: campaignId, leads, skip_if_in_workspace: true });
+}
+
+/** Instantly calls our webhook for every event in the campaign, with our secret header. */
+export function createWebhook(campaignId: string, url: string, secret: string) {
+  return api<{ id: string }>("POST", "/webhooks", {
+    name: "gbp-promoter",
+    target_hook_url: url,
+    campaign: campaignId,
+    event_type: "all_events",
+    headers: { [WEBHOOK_HEADER]: secret },
+  });
+}
+
+/** Never send to these again, from any campaign in the workspace. Emails or domains. */
+export async function blockList(values: string[]) {
+  if (values.length === 0) return;
+  await api("POST", "/block-lists-entries/bulk-create", { bl_values: values.slice(0, 1000) });
 }

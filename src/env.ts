@@ -30,7 +30,16 @@ const schema = z.object({
   ANALYSIS_MODEL: z.string().default("anthropic/claude-sonnet-5.5"),
   /** The two copywriters compared head to head, comma-separated. */
   WRITER_MODELS: z.string().default("moonshotai/kimi-k3,openai/gpt-5.5"),
+  /** Kimi direct (platform.moonshot.ai). When set, moonshotai/* models skip OpenRouter. */
+  MOONSHOT_API_KEY: optional,
+  MOONSHOT_BASE_URL: z.string().default("https://api.moonshot.ai/v1"),
   INSTANTLY_API_KEY: optional,
+  /** The campaign drafts are pushed into (npm run instantly:setup makes it). */
+  INSTANTLY_CAMPAIGN_ID: optional,
+  /** Our own shared secret: Instantly sends it as a header on every webhook. */
+  INSTANTLY_WEBHOOK_SECRET: optional,
+  /** This app's public address, for webhooks, e.g. https://promoter.macaws.ai */
+  APP_URL: optional,
   TRIGGER_SECRET_KEY: optional,
 });
 

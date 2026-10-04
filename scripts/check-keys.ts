@@ -11,6 +11,12 @@ async function main() {
   const or = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` } });
   console.log(`OpenRouter key: ${or.status === 200 ? "works" : `HTTP ${or.status}`}`);
 
+  if (env.MOONSHOT_API_KEY) {
+    const ms = await fetch(`${env.MOONSHOT_BASE_URL}/models`, { headers: { Authorization: `Bearer ${env.MOONSHOT_API_KEY}` } });
+    const msBody = (await ms.json().catch(() => ({}))) as { data?: { id: string }[] };
+    console.log(`Moonshot key: ${ms.status === 200 ? "works" : `HTTP ${ms.status}`}` + (msBody.data ? `, models: ${msBody.data.map((m) => m.id).join(", ")}` : ""));
+  } else console.log("Moonshot key: not set");
+
   const ins = await fetch("https://api.instantly.ai/api/v2/accounts?limit=50", {
     headers: { Authorization: `Bearer ${env.INSTANTLY_API_KEY}` },
   });

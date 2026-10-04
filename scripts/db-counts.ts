@@ -12,6 +12,12 @@ async function main() {
     select 'contacts: ' || email_status, count(*)::int from contacts group by email_status union all
     select 'sendable (valid + agency researched)', count(*)::int from contacts c join agencies a on a.id = c.agency_id
       where c.email_status = 'valid' and a.status = 'researched' union all
+    select 'drafts: unsent', count(*)::int from messages where sent_at is null union all
+    select 'drafts: passed check', count(*)::int from messages where sent_at is null and (guardrail->>'ok')::boolean union all
+    select 'drafts: pushed to Instantly', count(*)::int from messages where pushed_at is not null union all
+    select 'emails sent', count(*)::int from messages where sent_at is not null union all
+    select 'replies', count(*)::int from replies union all
+    select 'samples', count(*)::int from samples union all
     select 'suppression', count(*)::int from suppression`);
   for (const r of rows as unknown as { t: string; n: number }[]) console.log(`${r.t.padEnd(38)} ${r.n}`);
   process.exit(0);

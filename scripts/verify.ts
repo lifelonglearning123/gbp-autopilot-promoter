@@ -6,8 +6,9 @@ import { createHmac } from "node:crypto";
 import { agencyKey, domainOf, emailType, tidyEmail } from "../src/lib/contact-rules";
 import { signedByPlatform } from "../src/lib/platform";
 import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
-import { foldVerdict } from "../src/lib/instantly";
+import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
+import { draftProblems, pickSampleTarget, townOf } from "../src/lib/draft-rules";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -93,6 +94,40 @@ check("GHL: deliverable and low risk is valid; catch-all is risky; a role inbox 
   assert.equal(foldGhlVerdict({ result: "deliverable", risk: "high" }), "risky");
   assert.equal(foldGhlVerdict({ result: "undeliverable", risk: "high" }), "invalid");
   assert.equal(foldGhlVerdict({ result: "deliverable", leadconnectorRecomendation: { isEmailValid: false } }), "invalid");
+});
+
+console.log("\nDrafts");
+check("the audit is of the research's pick, else whatever the pages support", () => {
+  const facts = { location: "Leeds, UK", case_study_clients: [{ name: "Bright Smiles", town: "York" }] };
+  assert.deepEqual(pickSampleTarget("Acme", { ...facts, best_sample: "own" }), { kind: "own", name: "Acme", town: "Leeds" });
+  assert.deepEqual(pickSampleTarget("Acme", { ...facts, best_sample: "client" }), { kind: "client", name: "Bright Smiles", town: "York" });
+  assert.equal(pickSampleTarget("Acme", { best_sample: "prospect", location: "Leeds" })?.kind, "own");
+  assert.equal(pickSampleTarget("Acme", { best_sample: "client", case_study_clients: [{ name: "No Town", town: null }] }), null);
+  assert.equal(townOf("Manchester, England, UK"), "Manchester");
+  assert.equal(townOf(null), null);
+});
+check("a draft carries the sample link once, nothing else, and stays short and calm", () => {
+  const url = "https://gbp.macaws.ai/s/abc";
+  const good = { subject: "a quick audit of bright smiles", body: `Hi Jo,\n\nWe do white-label audits.\n${url}\n\nWorth a look?` };
+  assert.deepEqual(draftProblems(good, url), []);
+  assert.deepEqual(draftProblems({ ...good, body: good.body.replace(url, `${url}.`) }, url), [], "trailing full stop is fine");
+  assert.ok(draftProblems({ ...good, subject: "FREE audit!" }, url).some((p) => p.includes("shouts")));
+  assert.ok(draftProblems({ ...good, body: "Hi Jo, no link" }, url).some((p) => p.includes("0 times")));
+  assert.ok(draftProblems({ ...good, body: `Hi Jo, an audit: ${url}` }, url).some((p) => p.includes("white-label")));
+  assert.ok(draftProblems({ ...good, body: `${good.body} https://other.com` }, url).some((p) => p.includes("other than")));
+  assert.ok(draftProblems({ ...good, body: `Hi {{firstName}} ${url}` }, url).some((p) => p.includes("placeholder")));
+  assert.ok(draftProblems({ ...good, body: `${url} ${"word ".repeat(140)}` }, url).some((p) => p.includes("words")));
+});
+
+console.log("\nSending");
+check("a draft becomes safe HTML with its line breaks", () => {
+  assert.equal(bodyHtml("Hi Jo,\n\nA & B <c>\r\nhttps://x.io/s/1\n"), "Hi Jo,<br/><br/>A &amp; B &lt;c&gt;<br/>https://x.io/s/1");
+});
+check("an Instantly event is taken only with our secret", () => {
+  assert.equal(webhookSecretOk("s3cret", "s3cret"), true);
+  assert.equal(webhookSecretOk("s3cre", "s3cret"), false);
+  assert.equal(webhookSecretOk(null, "s3cret"), false);
+  assert.equal(webhookSecretOk("anything", undefined), false);
 });
 
 console.log(`\n${passed} checks passed`);

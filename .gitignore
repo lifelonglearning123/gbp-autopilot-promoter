@@ -25,3 +25,6 @@ npm-debug.log*
 
 # run logs
 *.log
+
+# drafts exported for review (names, email bodies)
+drafts/

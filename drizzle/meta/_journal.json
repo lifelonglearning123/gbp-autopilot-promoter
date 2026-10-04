@@ -22,6 +22,13 @@
       "when": 1791132877166,
       "tag": "0002_research_text",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791149782056,
+      "tag": "0003_instantly_push",
+      "breakpoints": true
     }
   ]
 }

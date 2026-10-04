@@ -13,7 +13,10 @@ export default function Home() {
     ["GBP Autopilot platform key", !!env.PLATFORM_BOT_API_KEY],
     ["Platform events secret", !!env.PLATFORM_WEBHOOK_SECRET],
     ["OpenRouter", !!env.OPENROUTER_API_KEY],
+    ["Kimi (Moonshot, direct)", !!env.MOONSHOT_API_KEY],
     ["Instantly", !!env.INSTANTLY_API_KEY],
+    ["Instantly campaign", !!env.INSTANTLY_CAMPAIGN_ID],
+    ["Instantly events secret", !!env.INSTANTLY_WEBHOOK_SECRET],
     ["Trigger.dev", !!env.TRIGGER_SECRET_KEY],
   ];
   return (

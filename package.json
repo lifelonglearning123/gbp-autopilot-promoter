@@ -13,6 +13,10 @@
     "import:ghl": "dotenv -e .env.local -- tsx scripts/import-ghl.ts",
     "verify:emails": "dotenv -e .env.local -- tsx scripts/verify-emails.ts",
     "research": "dotenv -e .env.local -- tsx scripts/research.ts",
+    "draft": "dotenv -e .env.local -- tsx scripts/draft.ts",
+    "drafts:review": "dotenv -e .env.local -- tsx scripts/drafts-review.ts",
+    "instantly:setup": "dotenv -e .env.local -- tsx scripts/instantly-setup.ts",
+    "push": "dotenv -e .env.local -- tsx scripts/push.ts",
     "db:counts": "dotenv -e .env.local -- tsx scripts/db-counts.ts",
     "check:keys": "dotenv -e .env.local -- tsx scripts/check-keys.ts",
     "platform:ping": "dotenv -e .env.local -- tsx scripts/platform-ping.ts"
