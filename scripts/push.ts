@@ -73,7 +73,7 @@ async function main() {
       .where(eq(messages.id, r.id));
   }
   console.log(
-    `\n${ready.length} sent to Instantly: ${res.leads_uploaded ?? 0} added, ${res.skipped_count ?? 0} skipped (already in workspace), ` +
+    `\n${ready.length} sent to Instantly: ${res.leads_uploaded ?? 0} added, ${res.skipped_count ?? 0} skipped,` +
       `${res.in_blocklist ?? 0} blocked, ${res.duplicated_leads ?? 0} duplicates.`,
   );
   process.exit(0);

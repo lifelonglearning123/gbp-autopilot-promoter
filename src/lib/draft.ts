@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { agencies, agencyResearch, contacts, messages, samples } from "@/db/schema";
 import { env } from "@/env";
@@ -154,6 +154,10 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
   }
 
   const passed = notes.length === 0;
+  // A re-draft replaces the earlier one, never one Instantly already has.
+  await db()
+    .delete(messages)
+    .where(and(eq(messages.contactId, contact.id), eq(messages.step, 1), isNull(messages.pushedAt)));
   await db().insert(messages).values({
     contactId: contact.id,
     writerModel: writer,

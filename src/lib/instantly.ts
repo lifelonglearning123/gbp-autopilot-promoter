@@ -149,7 +149,11 @@ export type NewLead = {
   custom_variables: Record<string, string>;
 };
 
-/** Up to 1000 leads into a campaign. Anyone already anywhere in the workspace is skipped. */
+/**
+ * Up to 1000 leads into a campaign. People who were leads in an earlier
+ * campaign are added too (a new offer): who must never be written to again is
+ * settled before this, by suppression and Instantly's block list.
+ */
 export async function addLeads(campaignId: string, leads: NewLead[]) {
   return api<{
     leads_uploaded?: number;
@@ -157,7 +161,7 @@ export async function addLeads(campaignId: string, leads: NewLead[]) {
     skipped_count?: number;
     duplicated_leads?: number;
     created_leads?: { index: number; id: string; email: string }[];
-  }>("POST", "/leads/add", { campaign_id: campaignId, leads, skip_if_in_workspace: true });
+  }>("POST", "/leads/add", { campaign_id: campaignId, leads, skip_if_in_workspace: false, skip_if_in_campaign: false });
 }
 
 /** Instantly calls our webhook for every event in the campaign, with our secret header. */

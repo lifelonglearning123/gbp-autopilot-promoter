@@ -19,23 +19,16 @@ const limit = arg("--limit", 3);
 const parallel = Math.max(1, Math.min(4, arg("--parallel", 1)));
 
 async function main() {
-  if (process.argv.includes("--redo")) {
-    // Drafts Instantly has not been given are only ours: drop them and start those agencies again.
-    const redo = (await db().execute(sql`
-      with gone as (
-        delete from messages m using contacts c
-        where c.id = m.contact_id and m.pushed_at is null and m.sent_at is null and m.step = 1
-        returning c.agency_id)
-      update agencies set status = 'researched', updated_at = now()
-      where id in (select agency_id from gone) and status in ('queued', 'needs_review')
-      returning id`)) as unknown as unknown[];
-    console.log(`${redo.length} agencies to re-draft\n`);
-  }
+  // --redo: agencies whose draft Instantly has not been given are drafted again.
+  // The old draft is replaced only once the new one is saved.
+  const redo = process.argv.includes("--redo");
   const todo = (await db().execute(sql`
     select distinct on (a.id) c.id, a.name
     from agencies a join contacts c on c.agency_id = a.id
-    where a.status = 'researched' and c.email_status = 'valid'
-      and not exists (select 1 from messages m join contacts c2 on c2.id = m.contact_id where c2.agency_id = a.id)
+    where c.email_status = 'valid'
+      and (a.status = 'researched' or (${redo} and a.status in ('queued', 'needs_review')))
+      and not exists (select 1 from messages m join contacts c2 on c2.id = m.contact_id
+                      where c2.agency_id = a.id and (m.pushed_at is not null or not ${redo}))
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     order by a.id, (c.email_type = 'work') desc, c.created_at
     limit ${limit}`)) as unknown as { id: string; name: string }[];
