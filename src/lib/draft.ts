@@ -2,7 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { agencies, agencyResearch, contacts, messages, samples } from "@/db/schema";
 import { env } from "@/env";
-import { draftProblems, pickSampleTarget } from "./draft-rules";
+import { draftProblems, pickSampleTarget, sameBusiness } from "./draft-rules";
 import { askJson } from "./openrouter";
 import { makeSample, PlatformError, type Sample } from "./platform";
 import type { Facts } from "./research";
@@ -33,6 +33,7 @@ Return ONLY a JSON object: {"subject": string, "body": string}.
 - Use only facts given below. Never invent clients, numbers, or results.`;
 
 const CHECKER = `You check a cold email before it is sent. Compare it with the research and the audit it was written from.
+True facts about our offer, which the email may state: GBP Autopilot is white-label: agencies resell it to local businesses under their own brand. It audits and scores a business's Google Business Profile and improves it, answers reviews, posts weekly and reports. From £149 a month. Three free audits once the agency claims its account. The sample audit linked in the email was made in the agency's own brand (its name, logo and colour).
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
 ok is false if the email: does not make clear that we offer white-label Google Business Profile auditing and optimisation the agency can resell to its local clients under its own brand; states anything not supported by the research or the audit (names, numbers, findings, services); misreads the audit; is pushy, flattering or hype-y; reads as a template; or would embarrass the sender if the agency checked it. notes: short, specific fixes (empty when ok).`;
 
@@ -89,6 +90,11 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
     const status = e instanceof PlatformError ? e.status : 0;
     if (status >= 400 && status < 500 && ![401, 403, 429].includes(status)) await setStatus(agency.id, "no_sample");
     return { ok: false, why: `sample: ${e instanceof Error ? e.message : e}` };
+  }
+  if (!sameBusiness(target.name, sample.result.title)) {
+    // Google matched a different business: an email about it would be wrong.
+    await setStatus(agency.id, "no_sample");
+    return { ok: false, why: `sample: found "${sample.result.title}", not "${target.name}"` };
   }
   await db()
     .insert(samples)

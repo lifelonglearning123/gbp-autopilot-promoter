@@ -2,7 +2,8 @@
  * Draft first emails (unsent) for researched agencies.
  *   npm run draft -- --limit 3
  *   npm run draft -- --limit 50 --parallel 3
- *   npm run draft -- --redo      (re-write drafts not yet pushed to Instantly)
+ *   npm run draft -- --redo          (re-write drafts not yet pushed to Instantly)
+ *   npm run draft -- --redo-failed   (only the ones the checker did not pass)
  * One contact per agency: a valid address, work email first, nothing drafted
  * yet, not suppressed. Each run asks the platform for a real sample audit.
  * Prints agency names and outcomes only; read the drafts with npm run drafts:review.
@@ -21,12 +22,13 @@ const parallel = Math.max(1, Math.min(4, arg("--parallel", 1)));
 async function main() {
   // --redo: agencies whose draft Instantly has not been given are drafted again.
   // The old draft is replaced only once the new one is saved.
-  const redo = process.argv.includes("--redo");
+  const failedOnly = process.argv.includes("--redo-failed");
+  const redo = failedOnly || process.argv.includes("--redo");
   const todo = (await db().execute(sql`
     select distinct on (a.id) c.id, a.name
     from agencies a join contacts c on c.agency_id = a.id
     where c.email_status = 'valid'
-      and (a.status = 'researched' or (${redo} and a.status in ('queued', 'needs_review')))
+      and (a.status = 'researched' or (${redo} and (a.status = 'needs_review' or (${!failedOnly} and a.status = 'queued'))))
       and not exists (select 1 from messages m join contacts c2 on c2.id = m.contact_id
                       where c2.agency_id = a.id and (m.pushed_at is not null or not ${redo}))
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)

@@ -30,6 +30,24 @@ export function pickSampleTarget(agencyName: string, facts: ResearchFacts): Samp
   return facts.best_sample === "client" ? (viaClient ?? own) : (own ?? viaClient);
 }
 
+const LEGAL = new Set(["llc", "inc", "ltd", "limited", "co", "corp", "plc", "the", "and", "of"]);
+const words = (s: string) =>
+  s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w && !LEGAL.has(w));
+
+/**
+ * Is the listing the platform audited the business we asked for? Every
+ * meaningful word of our name must be in the listing's ("Digital Marketing
+ * Inc." is not the nightclub "Digital"); names written together or apart
+ * ("PearPixels" / "Pear Pixels") also count.
+ */
+export function sameBusiness(asked: string, found: string): boolean {
+  const want = words(asked);
+  const got = words(found);
+  if (want.length === 0 || got.length === 0) return false;
+  if (want.every((w) => got.includes(w))) return true;
+  return got.join("").includes(want.join(""));
+}
+
 export const MAX_WORDS = 130;
 export const MAX_SUBJECT = 60;
 

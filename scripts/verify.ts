@@ -8,7 +8,7 @@ import { signedByPlatform } from "../src/lib/platform";
 import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
-import { draftProblems, pickSampleTarget, townOf } from "../src/lib/draft-rules";
+import { draftProblems, pickSampleTarget, sameBusiness, townOf } from "../src/lib/draft-rules";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -117,6 +117,16 @@ check("a draft carries the sample link once, nothing else, and stays short and c
   assert.ok(draftProblems({ ...good, body: `${good.body} https://other.com` }, url).some((p) => p.includes("other than")));
   assert.ok(draftProblems({ ...good, body: `Hi {{firstName}} ${url}` }, url).some((p) => p.includes("placeholder")));
   assert.ok(draftProblems({ ...good, body: `${url} ${"word ".repeat(140)}` }, url).some((p) => p.includes("words")));
+});
+
+check("an audit of a different business than asked for is caught", () => {
+  assert.equal(sameBusiness("Digital Marketing Inc.", "Digital"), false);
+  assert.equal(sameBusiness("PearPixels LLC", "Pearpixels LLC"), true);
+  assert.equal(sameBusiness("Pixel Agility", "Pixel Agility, LLC"), true);
+  assert.equal(sameBusiness("Elaunchers", "eLaunchers"), true);
+  assert.equal(sameBusiness("Pear Pixels", "PearPixels"), true);
+  assert.equal(sameBusiness("Saltz Plastic Surgery", "Saltz Plastic Surgery & Saltz Spa Vitoria"), true);
+  assert.equal(sameBusiness("Acme Roofing", "Best Roofing"), false);
 });
 
 console.log("\nSending");
