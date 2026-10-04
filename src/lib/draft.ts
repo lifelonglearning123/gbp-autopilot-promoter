@@ -104,8 +104,11 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
     })
     .onConflictDoNothing();
 
-  const writer = contact.writerModel ?? writerFor(contact.id);
-  if (!contact.writerModel) {
+  // A contact keeps its writer for the whole conversation; one dropped from
+  // WRITER_MODELS before anything was pushed is replaced (drafts reach here unpushed).
+  const kept = contact.writerModel && env.WRITER_MODELS.split(",").map((m) => m.trim()).includes(contact.writerModel);
+  const writer = kept ? contact.writerModel! : writerFor(contact.id);
+  if (writer !== contact.writerModel) {
     await db().update(contacts).set({ writerModel: writer, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
   }
 

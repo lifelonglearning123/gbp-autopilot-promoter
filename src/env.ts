@@ -26,10 +26,10 @@ const schema = z.object({
 
   // Still to come: models, sending, jobs.
   OPENROUTER_API_KEY: optional,
-  /** Research, reply sorting, draft checking, weekly review. */
-  ANALYSIS_MODEL: z.string().default("anthropic/claude-sonnet-5.5"),
-  /** The two copywriters compared head to head, comma-separated. */
-  WRITER_MODELS: z.string().default("moonshotai/kimi-k3,openai/gpt-5.5"),
+  /** Research, reply sorting, draft checking, weekly review. Kimi direct, for cost. */
+  ANALYSIS_MODEL: z.string().default("moonshotai/kimi-k3"),
+  /** The copywriters, comma-separated; two or more are compared head to head. Kimi only, for cost. */
+  WRITER_MODELS: z.string().default("moonshotai/kimi-k3"),
   /** Kimi direct (platform.moonshot.ai). When set, moonshotai/* models skip OpenRouter. */
   MOONSHOT_API_KEY: optional,
   MOONSHOT_BASE_URL: z.string().default("https://api.moonshot.ai/v1"),

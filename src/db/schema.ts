@@ -88,7 +88,7 @@ export const contacts = pgTable(
     /** For CASL: the page the address was published on, and when we saw it. */
     sourceProof: jsonb("source_proof").$type<{ url: string; seenAt: string }>(),
     ghlContactId: text("ghl_contact_id"),
-    /** Assigned once, for the whole conversation: kimi-k3 | gpt-5.5. */
+    /** Assigned once, for the whole conversation, from WRITER_MODELS (e.g. moonshotai/kimi-k3). */
     writerModel: text("writer_model"),
     ...timestamps,
   },
