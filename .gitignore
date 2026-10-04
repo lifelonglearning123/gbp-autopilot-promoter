@@ -1,0 +1,24 @@
+# secrets — never commit
+.env
+.env*.local
+
+# dependencies and builds
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# vercel / trigger.dev
+.vercel/
+.trigger/
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# logs
+npm-debug.log*
