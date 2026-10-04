@@ -54,7 +54,7 @@ export async function verificationStatus(email: string): Promise<Verified> {
 
 /* ── Sending ─────────────────────────────────────────────────────────────── */
 
-async function api<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+async function api<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: headers(),
@@ -82,10 +82,32 @@ export function webhookSecretOk(header: string | null, secret: string | undefine
 
 export const WEBHOOK_HEADER = "x-promoter-secret";
 
-/** The sending accounts that can send now (status 1). */
-export async function sendingAccounts(): Promise<string[]> {
-  const body = await api<{ items?: { email: string; status?: number }[] }>("GET", "/accounts?limit=100");
+/**
+ * The workspace is shared with another client (Outbound Console's set-up):
+ * each client's mailboxes and campaigns carry its own tag. Ours is
+ * INSTANTLY_TAG; nothing here ever uses a mailbox without it.
+ */
+export async function ourTagId(): Promise<string> {
+  const body = await api<{ items?: { id: string; label: string }[] }>("GET", "/custom-tags?limit=100");
+  const tag = (body.items ?? []).find((t) => t.label.toLowerCase() === env.INSTANTLY_TAG.toLowerCase());
+  if (!tag) throw new Error(`No Instantly tag "${env.INSTANTLY_TAG}": our mailboxes must carry it.`);
+  return tag.id;
+}
+
+/** Our mailboxes that can send now (status 1): only those with our tag. */
+export async function sendingAccounts(tagId: string): Promise<string[]> {
+  const body = await api<{ items?: { email: string; status?: number }[] }>("GET", `/accounts?limit=100&tag_ids=${tagId}`);
   return (body.items ?? []).filter((a) => a.status === 1).map((a) => a.email);
+}
+
+/** Put our tag on a campaign, so Outbound Console shows it under our client. */
+export async function tagCampaign(tagId: string, campaignId: string) {
+  await api("POST", "/custom-tags/toggle-resource", { tag_ids: [tagId], resource_type: 2, resource_ids: [campaignId], assign: true });
+}
+
+/** Send only from these mailboxes. */
+export async function setCampaignAccounts(campaignId: string, accounts: string[]) {
+  return api<{ email_list?: string[] }>("PATCH", `/campaigns/${campaignId}`, { email_list: accounts });
 }
 
 /**

@@ -34,6 +34,8 @@ const schema = z.object({
   MOONSHOT_API_KEY: optional,
   MOONSHOT_BASE_URL: z.string().default("https://api.moonshot.ai/v1"),
   INSTANTLY_API_KEY: optional,
+  /** Our tag in the shared Instantly workspace: only mailboxes carrying it are ours. */
+  INSTANTLY_TAG: z.string().default("Signal"),
   /** The campaign drafts are pushed into (npm run instantly:setup makes it). */
   INSTANTLY_CAMPAIGN_ID: optional,
   /** Our own shared secret: Instantly sends it as a header on every webhook. */
