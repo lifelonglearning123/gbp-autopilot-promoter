@@ -1,59 +1,61 @@
 /**
- * Verify contacts' email addresses with Instantly (one credit each).
- *   npm run verify:emails -- --limit 5
- * Skips addresses GHL already marked invalid. Prints totals only.
+ * Verify contacts' email addresses.
+ *   npm run verify:emails -- --limit 5            (GHL, paid from the location wallet)
+ *   npm run verify:emails -- --limit 5 --instantly (Instantly credits)
+ * Skips addresses already checked or marked invalid. Prints totals only.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "../src/db/client";
 import { contacts } from "../src/db/schema";
-import { verificationStatus, verifyEmail, type Verified } from "../src/lib/instantly";
+import { verifyEmailGhl } from "../src/lib/ghl";
+import { verificationStatus, verifyEmail } from "../src/lib/instantly";
 
-const limitArg = process.argv.indexOf("--limit");
-const limit = limitArg > 0 ? Number(process.argv[limitArg + 1]) || 5 : 5;
+const arg = (name: string, fallback: number) => {
+  const i = process.argv.indexOf(name);
+  return i > 0 ? Number(process.argv[i + 1]) || fallback : fallback;
+};
+const limit = arg("--limit", 5);
+const parallel = Math.max(1, Math.min(5, arg("--parallel", 2)));
+const useInstantly = process.argv.includes("--instantly");
+
+async function check(email: string): Promise<string> {
+  if (!useInstantly) return verifyEmailGhl(email);
+  const v = await verifyEmail(email);
+  if (v !== "pending") return v;
+  await new Promise((r) => setTimeout(r, 15_000));
+  return verificationStatus(email);
+}
 
 async function main() {
   const todo = await db()
     .select({ id: contacts.id, email: contacts.email })
     .from(contacts)
-    .where(and(eq(contacts.emailStatus, "unverified")))
+    .where(eq(contacts.emailStatus, "unverified"))
     .orderBy(asc(contacts.createdAt))
     .limit(limit);
 
-  const tally: Record<Verified | "error", number> = { valid: 0, risky: 0, invalid: 0, pending: 0, error: 0 };
-  const pending: { id: string; email: string }[] = [];
-  for (const c of todo) {
-    try {
-      const v = await verifyEmail(c.email);
-      tally[v]++;
-      if (v === "pending") pending.push(c);
-      else await db().update(contacts).set({ emailStatus: v, updatedAt: new Date() }).where(eq(contacts.id, c.id));
-    } catch (e) {
-      tally.error++;
-      const why = e instanceof Error ? e.message : String(e);
-      // No credits will not fix itself mid-run: stop and say so.
-      if (/no credits/i.test(why)) {
-        console.log(`Stopped: ${why}. Add verification credits in Instantly and run again.`);
-        break;
-      }
-    }
-  }
-  // Slow mail servers come back "pending"; one more look after a pause.
-  if (pending.length) {
-    await new Promise((r) => setTimeout(r, 15_000));
-    for (const c of pending) {
+  const tally: Record<string, number> = {};
+  let stop: string | null = null;
+  const queue = [...todo];
+  async function worker() {
+    for (let c = queue.shift(); c && !stop; c = queue.shift()) {
       try {
-        const v = await verificationStatus(c.email);
+        const v = await check(c.email);
+        tally[v] = (tally[v] ?? 0) + 1;
         if (v !== "pending") {
-          tally.pending--;
-          tally[v]++;
           await db().update(contacts).set({ emailStatus: v, updatedAt: new Date() }).where(eq(contacts.id, c.id));
         }
-      } catch {
-        // stays unverified; the next run asks again
+      } catch (e) {
+        tally.error = (tally.error ?? 0) + 1;
+        const why = e instanceof Error ? e.message : String(e);
+        // Out of credit or wallet will not fix itself mid-run: stop and say so.
+        if (/credit|wallet|balance|insufficient|40[23]/i.test(why)) stop = why;
       }
     }
   }
-  console.log(`Checked ${todo.length}:`, JSON.stringify(tally));
+  await Promise.all(Array.from({ length: parallel }, worker));
+  if (stop) console.log(`Stopped early: ${stop}`);
+  console.log(`Checked ${Object.values(tally).reduce((a, b) => a + b, 0)} of ${todo.length} (${useInstantly ? "Instantly" : "GHL"}):`, JSON.stringify(tally));
   process.exit(0);
 }
 main();

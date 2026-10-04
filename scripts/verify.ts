@@ -7,6 +7,7 @@ import { agencyKey, domainOf, emailType, tidyEmail } from "../src/lib/contact-ru
 import { signedByPlatform } from "../src/lib/platform";
 import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
 import { foldVerdict } from "../src/lib/instantly";
+import { foldGhlVerdict } from "../src/lib/ghl";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -85,6 +86,13 @@ check("a catch-all 'valid' is only risky", () => {
   assert.equal(foldVerdict({ verification_status: "invalid" }), "invalid");
   assert.equal(foldVerdict({ verification_status: "pending" }), "pending");
   assert.equal(foldVerdict({ verification_status: "something new" }), "risky");
+});
+check("GHL: deliverable and low risk is valid; catch-all is risky; a role inbox is fine", () => {
+  assert.equal(foldGhlVerdict({ result: "deliverable", risk: "low", reason: ["mailbox_is_role_address"] }), "valid");
+  assert.equal(foldGhlVerdict({ result: "deliverable", risk: "low", reason: ["accept_all"] }), "risky");
+  assert.equal(foldGhlVerdict({ result: "deliverable", risk: "high" }), "risky");
+  assert.equal(foldGhlVerdict({ result: "undeliverable", risk: "high" }), "invalid");
+  assert.equal(foldGhlVerdict({ result: "deliverable", leadconnectorRecomendation: { isEmailValid: false } }), "invalid");
 });
 
 console.log(`\n${passed} checks passed`);
