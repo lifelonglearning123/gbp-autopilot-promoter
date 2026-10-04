@@ -8,6 +8,20 @@
       "when": 1791128430360,
       "tag": "0000_minor_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791132737325,
+      "tag": "0001_drop_raw_url",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791132877166,
+      "tag": "0002_research_text",
+      "breakpoints": true
     }
   ]
 }

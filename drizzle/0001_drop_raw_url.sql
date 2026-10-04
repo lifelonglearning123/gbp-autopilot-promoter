@@ -1,0 +1,1 @@
+ALTER TABLE "agency_research" DROP COLUMN "raw_url";

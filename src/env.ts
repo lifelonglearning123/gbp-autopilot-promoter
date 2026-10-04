@@ -26,6 +26,10 @@ const schema = z.object({
 
   // Still to come: models, sending, jobs.
   OPENROUTER_API_KEY: optional,
+  /** Research, reply sorting, draft checking, weekly review. */
+  ANALYSIS_MODEL: z.string().default("anthropic/claude-sonnet-5.5"),
+  /** The two copywriters compared head to head, comma-separated. */
+  WRITER_MODELS: z.string().default("moonshotai/kimi-k3,openai/gpt-5.5"),
   INSTANTLY_API_KEY: optional,
   TRIGGER_SECRET_KEY: optional,
 });

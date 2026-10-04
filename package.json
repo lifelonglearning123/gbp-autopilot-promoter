@@ -10,7 +10,12 @@
     "verify": "tsx scripts/verify.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
-    "import:ghl": "dotenv -e .env.local -- tsx scripts/import-ghl.ts"
+    "import:ghl": "dotenv -e .env.local -- tsx scripts/import-ghl.ts",
+    "verify:emails": "dotenv -e .env.local -- tsx scripts/verify-emails.ts",
+    "research": "dotenv -e .env.local -- tsx scripts/research.ts",
+    "db:counts": "dotenv -e .env.local -- tsx scripts/db-counts.ts",
+    "check:keys": "dotenv -e .env.local -- tsx scripts/check-keys.ts",
+    "platform:ping": "dotenv -e .env.local -- tsx scripts/platform-ping.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.3",

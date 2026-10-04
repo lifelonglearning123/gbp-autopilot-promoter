@@ -55,8 +55,10 @@ export const agencyResearch = pgTable(
     version: integer("version").notNull(),
     researchedAt: timestamp("researched_at", { withTimezone: true }).notNull().defaultNow(),
     pagesCrawled: jsonb("pages_crawled").$type<string[]>().notNull().default([]),
-    /** Raw page text, in Vercel Blob. */
-    rawUrl: text("raw_url"),
+    /** The pages' text as read, kept so the research can be re-read or re-scored later. */
+    rawText: text("raw_text"),
+    /** What else the pages gave: logo candidates, theme colour, emails published on them. */
+    signals: jsonb("signals").$type<Record<string, unknown>>().notNull().default({}),
     facts: jsonb("facts").$type<Record<string, unknown>>().notNull().default({}),
     summary: text("summary"),
     fitScore: integer("fit_score"),

@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { agencyKey, domainOf, emailType, tidyEmail } from "../src/lib/contact-rules";
 import { signedByPlatform } from "../src/lib/platform";
+import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
+import { foldVerdict } from "../src/lib/instantly";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -47,6 +49,42 @@ check("only a body signed with our secret is accepted", () => {
   assert.equal(signedByPlatform(body, sig, "other"), false);
   assert.equal(signedByPlatform(body, sig, undefined), false);
   assert.equal(signedByPlatform(body, null, "s3cret"), false);
+});
+
+console.log("\nReading websites");
+const HTML = `<html><head><title>Acme &amp; Co</title><meta name="theme-color" content="#0E9F6E">
+<link rel="icon" href="/fav.png"><meta property="og:image" content="https://acme.io/og.jpg"></head>
+<body><script>var x=1</script><header><img class="site-logo" src="/img/logo.png"></header>
+<nav><a href="/services/local-seo">Local SEO</a><a href="/blog/post-1">Blog</a><a href="/about-us">About</a>
+<a href="https://other.com/x">Out</a><a href="/case-studies#top">Cases</a><a href="/brochure.pdf">PDF</a></nav>
+<p>We help trades win on Google Maps.</p><p>Email hello@acme.io or logo@2x.png</p></body></html>`;
+check("page text drops scripts and markup", () => {
+  const t = pageText(HTML);
+  assert.ok(t.includes("We help trades win on Google Maps."));
+  assert.ok(!t.includes("var x"));
+});
+check("only same-site pages are followed, and the useful ones first", () => {
+  const links = internalLinks(HTML, "https://www.acme.io/");
+  assert.ok(!links.some((l) => l.includes("other.com") || l.endsWith(".pdf")));
+  const picked = pickPages(links);
+  assert.equal(picked[0], "https://www.acme.io/services/local-seo");
+  assert.ok(!picked.some((l) => l.includes("/blog")), "blog posts are not research");
+});
+check("logo, colour and published emails are read off the page", () => {
+  const logos = logoCandidates(HTML, "https://acme.io/");
+  assert.equal(logos[0], "https://acme.io/img/logo.png");
+  assert.ok(logos.includes("https://acme.io/og.jpg"));
+  assert.equal(themeColour(HTML), "#0e9f6e");
+  assert.deepEqual(publishedEmails(HTML), ["hello@acme.io"]);
+});
+
+console.log("\nEmail verification");
+check("a catch-all 'valid' is only risky", () => {
+  assert.equal(foldVerdict({ verification_status: "verified", catch_all: false }), "valid");
+  assert.equal(foldVerdict({ verification_status: "verified", catch_all: true }), "risky");
+  assert.equal(foldVerdict({ verification_status: "invalid" }), "invalid");
+  assert.equal(foldVerdict({ verification_status: "pending" }), "pending");
+  assert.equal(foldVerdict({ verification_status: "something new" }), "risky");
 });
 
 console.log(`\n${passed} checks passed`);
