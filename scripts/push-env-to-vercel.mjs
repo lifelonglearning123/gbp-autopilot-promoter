@@ -40,8 +40,8 @@ for (const key of KEYS) {
     console.log(`${key}: not in .env.local, skipped`);
     continue;
   }
-  spawnSync("vercel", ["env", "rm", key, "production", "--yes"], { shell: true, stdio: "ignore" });
+  spawnSync("npx", ["vercel", "env", "rm", key, "production", "--yes"], { shell: true, stdio: "ignore" });
   // On stdin with no trailing newline, so it arrives exactly as written.
-  const r = spawnSync("vercel", ["env", "add", key, "production"], { shell: true, input: env[key], stdio: ["pipe", "ignore", "pipe"] });
+  const r = spawnSync("npx", ["vercel", "env", "add", key, "production"], { shell: true, input: env[key], stdio: ["pipe", "ignore", "pipe"] });
   console.log(`${key}: ${r.status === 0 ? "set" : `failed (${r.stderr.toString().trim().split("\n").pop()})`}`);
 }

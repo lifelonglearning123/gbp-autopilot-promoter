@@ -31,3 +31,6 @@ drafts/
 
 # Claude Code personal settings
 .claude/settings.local.json
+
+.vercel
+.env*
