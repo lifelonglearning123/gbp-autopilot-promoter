@@ -54,7 +54,7 @@ export async function verificationStatus(email: string): Promise<Verified> {
 
 /* ── Sending ─────────────────────────────────────────────────────────────── */
 
-async function api<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<T> {
+async function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: headers(),
@@ -150,15 +150,58 @@ export async function createFirstEmailCampaign(name: string, accounts: string[])
  * legal line and opt-out under every one (a cold email must say who sent it
  * and how to stop more).
  */
-export function campaignBody(signoff: string, legal: string): string {
+export function campaignBody(signoff: string, legal: string, variable = "body_html"): string {
   const footer = `${signoff}\n\n${legal}\nNot relevant? Reply "remove" and I will take you off this list straight away.`;
-  return `<div>{{body_html}}</div><div><br /></div>${bodyHtml(footer)}`;
+  return `<div>{{${variable}}}</div><div><br /></div>${bodyHtml(footer)}`;
 }
 
 export async function setCampaignCopy(campaignId: string, body: string) {
   return api<{ id: string }>("PATCH", `/campaigns/${campaignId}`, {
     sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body }] }] }],
   });
+}
+
+/**
+ * The whole sequence: the first email, then follow-ups on days 3, 7 and 14.
+ * Follow-ups have no subject, so they go as replies in the same thread.
+ * Instantly's `delay` is the wait before the NEXT step.
+ */
+export const SEQUENCE_DAYS = [0, 3, 7, 14] as const;
+
+export function sequenceSteps(signoff: string, legal: string, unit: "days" | "minutes" = "days") {
+  const vars = ["body_html", "body_2_html", "body_3_html", "body_4_html"];
+  return vars.map((v, i) => ({
+    type: "email",
+    delay: i < vars.length - 1 ? SEQUENCE_DAYS[i + 1] - SEQUENCE_DAYS[i] : 0,
+    delay_unit: unit,
+    variants: [{ subject: i === 0 ? "{{subject}}" : "", body: campaignBody(signoff, legal, v) }],
+  }));
+}
+
+export async function setCampaignSequence(campaignId: string, steps: ReturnType<typeof sequenceSteps>) {
+  return api<{ id: string; sequences?: { steps: unknown[] }[] }>("PATCH", `/campaigns/${campaignId}`, { sequences: [{ steps }] });
+}
+
+export type CampaignLead = { id: string; email: string; status?: number; payload?: Record<string, unknown> };
+
+export async function campaignLeads(campaignId: string): Promise<CampaignLead[]> {
+  const all: CampaignLead[] = [];
+  let after: string | undefined;
+  do {
+    const r = await api<{ items?: CampaignLead[]; next_starting_after?: string }>("POST", "/leads/list", {
+      campaign: campaignId,
+      limit: 100,
+      starting_after: after,
+    });
+    all.push(...(r.items ?? []));
+    after = r.next_starting_after;
+  } while (after);
+  return all;
+}
+
+/** Replace a lead's custom variables (always the full set). */
+export async function setLeadVars(leadId: string, vars: Record<string, string>) {
+  return api<{ id: string }>("PATCH", `/leads/${leadId}`, { custom_variables: vars });
 }
 
 export type NewLead = {

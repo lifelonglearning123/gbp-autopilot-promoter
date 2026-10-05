@@ -4,6 +4,7 @@ import { agencies, agencyResearch, contacts, messages, samples } from "@/db/sche
 import { env } from "@/env";
 import { draftProblems, sameBusiness, sampleTargets, type SampleTarget } from "./draft-rules";
 import { askJson } from "./openrouter";
+import { OFFER_FACTS } from "./offer";
 import { makeSample, PlatformError, type Sample } from "./platform";
 import type { Facts } from "./research";
 
@@ -18,7 +19,8 @@ import type { Facts } from "./research";
  * either way; the agency moves to "queued" only when the draft passed.
  */
 
-const WRITER = `You write the first cold email from GBP Autopilot to a marketing agency. GBP Autopilot is a white-label platform agencies resell to local businesses: it scores and improves each client's Google Business Profile, answers reviews, posts weekly and reports, all under the agency's own brand, from £149 a month. The agency can run three free audits for its own clients once it claims its account.
+const WRITER = `You write the first cold email from GBP Autopilot to a marketing agency that runs on GoHighLevel.
+${OFFER_FACTS}
 
 What we offer them, which the reader must understand by the end of the email: a white-label service for auditing and optimising local businesses' Google Business Profiles, which the agency sells to its own local clients under its own brand. We do the work; the agency's name is on it and it keeps the client relationship. We already ran one audit for them, in their brand, as a demonstration of what their clients would get.
 
@@ -26,14 +28,15 @@ Return ONLY a JSON object: {"subject": string, "body": string}.
 - subject: under 50 characters, lower-key, no exclamation marks, no capitals for emphasis. It should hint at the white-label offer or the audit, not be a vague teaser.
 - body: plain text, UK English, 70-120 words, short paragraphs. Greet by first name if given, else "Hi there".
 - Open with one specific, true thing about their agency from the research, as the reason this offer suits them.
-- Then say plainly, in one or two sentences, what we offer: white-label Google Business Profile auditing and optimisation for their local business clients, under their brand, that they can resell. Use the words "white-label" and "Google Business Profile" (or "Google listing").
+- Then say plainly, in one or two sentences, what we offer: white-label Google Business Profile auditing and optimisation for their local business clients, under their brand, that they can resell. Use the words "white-label" and "Google Business Profile" (or "Google listing"). Say in a few words that it works with the GoHighLevel they already use (e.g. findings land in their GHL sub-accounts as tasks).
 - Then the sample audit as proof: whose listing it is, one or two concrete findings from it, and the link, written out exactly once on its own line. Say it is already in their brand.
 - One soft question at the end, about whether they would offer this to their clients.
 - No sign-off or name (the signature is added later), no other links, no prices unless it fits naturally, no placeholders, no flattery, no hype words (revolutionary, game-changer, skyrocket).
 - Use only facts given below. Never invent clients, numbers, or results.`;
 
 const CHECKER = `You check a cold email before it is sent. Compare it with the research and the audit it was written from.
-True facts about our offer, which the email may state: GBP Autopilot is white-label: agencies resell it to local businesses under their own brand. It audits and scores a business's Google Business Profile and improves it, answers reviews, posts weekly and reports. From £149 a month. Three free audits once the agency claims its account. The sample audit linked in the email was made in the agency's own brand (its name, logo and colour).
+True facts about our offer, which the email may state:
+${OFFER_FACTS}
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
 ok is false if the email: does not make clear that we offer white-label Google Business Profile auditing and optimisation the agency can resell to its local clients under its own brand; states anything not supported by the research or the audit (names, numbers, findings, services); misreads the audit; is pushy, flattering or hype-y; reads as a template; or would embarrass the sender if the agency checked it. notes: short, specific fixes (empty when ok).`;
 

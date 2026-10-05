@@ -9,6 +9,8 @@ import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, th
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
 import { actionLink, signatureOk } from "../src/lib/links";
+import { followUpProblems, templateFollowUps } from "../src/lib/draft-rules";
+import { sequenceSteps } from "../src/lib/instantly";
 import { countryOf, draftProblems, pickSampleTarget, sameBusiness, sampleTargets, townOf } from "../src/lib/draft-rules";
 
 let passed = 0;
@@ -149,6 +151,31 @@ check("an Instantly event is taken only with our secret", () => {
   assert.equal(webhookSecretOk("s3cre", "s3cret"), false);
   assert.equal(webhookSecretOk(null, "s3cret"), false);
   assert.equal(webhookSecretOk("anything", undefined), false);
+});
+
+console.log("\nFollow-ups");
+check("follow-ups: short, only our links, step 3 carries the claim link", () => {
+  const p = "https://gbp.macaws.ai/preview/x";
+  const c = "https://gbp.macaws.ai/claim/y";
+  const good = { body_2: `Hi Jo,\n\nOne more thing.\n${p}\n\nWorth a look?`, body_3: `Hi Jo,\n\nHow it works.\n${c}\n\nFit?`, body_4: "Hi Jo, I'll leave it here." };
+  assert.deepEqual(followUpProblems(good, p, c), []);
+  assert.ok(followUpProblems({ ...good, body_3: `Hi Jo ${p}` }, p, c).some((x) => x.includes("claim link")));
+  assert.ok(followUpProblems({ ...good, body_2: "see https://evil.com" }, p, c).some((x) => x.includes("not the audit")));
+  assert.ok(followUpProblems({ ...good, body_4: "" }, p, c).some((x) => x.includes("empty")));
+  assert.ok(followUpProblems({ ...good, body_4: "word ".repeat(70) }, p, c).some((x) => x.includes("words")));
+  assert.deepEqual(followUpProblems({ ...good, body_3: `Hi ${p}` }, p, null), [], "no claim link: the audit link will do");
+});
+check("the template follow-ups pass the same rules", () => {
+  const p = "https://gbp.macaws.ai/preview/x";
+  const t = templateFollowUps({ firstName: "Jo", finding: "No new reviews in 90 days.", previewUrl: p, claimUrl: "https://gbp.macaws.ai/claim/y" });
+  assert.deepEqual(followUpProblems(t, p, "https://gbp.macaws.ai/claim/y"), []);
+  assert.deepEqual(followUpProblems(templateFollowUps({ firstName: null, finding: null, previewUrl: p, claimUrl: null }), p, null), []);
+});
+check("the sequence runs day 0, 3, 7, 14, follow-ups in the same thread", () => {
+  const steps = sequenceSteps("Chao", "Legal");
+  assert.deepEqual(steps.map((s) => s.delay), [3, 4, 7, 0]);
+  assert.deepEqual(steps.map((s) => s.variants[0].subject), ["{{subject}}", "", "", ""]);
+  assert.ok(steps[2].variants[0].body.includes("{{body_3_html}}"));
 });
 
 console.log("\nOwner's links");

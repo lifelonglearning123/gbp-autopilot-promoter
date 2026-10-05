@@ -4,6 +4,7 @@ import { agencies, contacts, controls, events, messages, replies, suppression } 
 import { env } from "@/env";
 import { pauseAll, pausedState } from "./control";
 import { draftFirstEmail } from "./draft";
+import { draftFollowUps, followUpVars } from "./followups";
 import { verifyEmailGhl } from "./ghl";
 import { importGhl } from "./import-ghl";
 import { addLeads, blockList, bodyHtml } from "./instantly";
@@ -86,6 +87,8 @@ export async function draftSome(limit: number, deadline: number, log: Log) {
   const tally: Record<string, number> = {};
   await pool(todo, 3, deadline, async (c) => {
     const r = await draftFirstEmail(c.id);
+    // The whole sequence is written at once: a lead is only pushed with all four.
+    if (r.ok && r.passed) await draftFollowUps(c.id);
     const k = r.ok ? (r.passed ? "queued" : "needs_review") : r.why.split(":")[0];
     tally[k] = (tally[k] ?? 0) + 1;
   });
@@ -123,15 +126,29 @@ export async function pushDue(limit: number, log: Log): Promise<number> {
   const blocked = await db().select({ email: suppression.email, domain: suppression.domain }).from(suppression);
   await blockList(blocked.map((b) => b.email ?? b.domain).filter((v): v is string => !!v));
 
+  // Each lead carries its whole sequence; one without follow-ups waits (they are written next run).
+  const withFollowUps: (typeof ready[number] & { vars: Record<string, string> })[] = [];
+  for (const r of ready) {
+    const [m] = await db().select({ contactId: messages.contactId }).from(messages).where(eq(messages.id, r.id)).limit(1);
+    let vars = await followUpVars(m.contactId, bodyHtml);
+    if (!vars) {
+      await draftFollowUps(m.contactId).catch(() => null);
+      vars = await followUpVars(m.contactId, bodyHtml);
+    }
+    if (vars) withFollowUps.push({ ...r, vars });
+  }
+  ready.splice(0, ready.length, ...withFollowUps);
+  if (ready.length === 0) return 0;
+
   const res = await addLeads(
     campaignId,
-    ready.map((r) => ({
+    withFollowUps.map((r) => ({
       email: r.email,
       first_name: r.first_name ?? undefined,
       last_name: r.last_name ?? undefined,
       company_name: r.agency,
       website: r.website ?? undefined,
-      custom_variables: { subject: r.subject, body_html: bodyHtml(r.body), message_id: r.id },
+      custom_variables: { subject: r.subject, body_html: bodyHtml(r.body), message_id: r.id, ...r.vars },
     })),
   );
   const now = new Date();

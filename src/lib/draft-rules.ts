@@ -66,6 +66,46 @@ export function sameBusiness(asked: string, found: string): boolean {
   return got.join("").includes(want.join(""));
 }
 
+/* ── Follow-ups (steps 2-4, sent as replies in the same thread) ───────── */
+
+export type FollowUps = { body_2: string; body_3: string; body_4: string };
+export const FOLLOW_UP_MAX_WORDS = { body_2: 80, body_3: 120, body_4: 60 } as const;
+
+/**
+ * Rules a follow-up set must pass before any model judges it: short, only our
+ * two links (the audit, the claim link), step 3 carries the claim link when
+ * there is one, nothing left unfilled.
+ */
+export function followUpProblems(f: FollowUps, previewUrl: string, claimUrl: string | null): string[] {
+  const problems: string[] = [];
+  const ours = new Set([previewUrl, claimUrl].filter(Boolean));
+  for (const key of ["body_2", "body_3", "body_4"] as const) {
+    const body = (f[key] ?? "").trim();
+    if (!body) {
+      problems.push(`${key} is empty`);
+      continue;
+    }
+    const words = body.split(/\s+/).length;
+    if (words > FOLLOW_UP_MAX_WORDS[key]) problems.push(`${key} is ${words} words (max ${FOLLOW_UP_MAX_WORDS[key]})`);
+    const links = (body.match(/https?:\/\/\S+/g) ?? []).map((l) => l.replace(/[).,;:!?]+$/, ""));
+    if (links.some((l) => !ours.has(l))) problems.push(`${key} has a link that is not the audit or the claim link`);
+    if (/\{\{|\}\}|\[(first ?name|name|agency|link)\]/i.test(body)) problems.push(`${key} has an unfilled placeholder`);
+  }
+  const want = claimUrl ?? previewUrl;
+  if (!(f.body_3 ?? "").includes(want)) problems.push(`body_3 must include ${claimUrl ? "the claim link" : "the audit link"}`);
+  return problems;
+}
+
+/** Safe follow-ups from facts alone, for when the writer's fail the check twice. */
+export function templateFollowUps(o: { firstName: string | null; finding: string | null; previewUrl: string; claimUrl: string | null }): FollowUps {
+  const hi = o.firstName?.trim() ? `Hi ${o.firstName.trim()},` : "Hi there,";
+  return {
+    body_2: `${hi}\n\nOne more thing from the audit${o.finding ? `: ${o.finding.replace(/\.$/, "")}.` : "."} It's the kind of fix your clients would see in the first month.\n\n${o.previewUrl}\n\nWorth a look?`,
+    body_3: `${hi}\n\nHow it works: you sell Google Business Profile management to your local clients under your own brand, and we do the work behind it: audits, fixes, review replies, weekly posts and reports. It works with the GoHighLevel you already use, so each audit lands in your sub-account with the findings and the tasks. From £149 a month, and your first three client audits are free.\n\nYou can claim your account here:\n${o.claimUrl ?? o.previewUrl}\n\nWould that fit what you offer?`,
+    body_4: `${hi}\n\nI'll leave it here so I'm not filling your inbox. If white-label Google Business Profile work becomes useful for your clients, just reply and I'll pick it up.`,
+  };
+}
+
 export const MAX_WORDS = 130;
 export const MAX_SUBJECT = 60;
 
