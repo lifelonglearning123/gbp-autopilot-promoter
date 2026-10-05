@@ -4,7 +4,7 @@ import { agencies, contacts, controls, events, messages, replies, suppression } 
 import { env } from "@/env";
 import { pauseAll, pausedState } from "./control";
 import { draftFirstEmail } from "./draft";
-import { draftFollowUps, followUpVars } from "./followups";
+import { draftFollowUps, followUpVars, syncFollowUps } from "./followups";
 import { verifyEmailGhl } from "./ghl";
 import { importGhl } from "./import-ghl";
 import { addLeads, blockList, bodyHtml } from "./instantly";
@@ -94,6 +94,20 @@ export async function draftSome(limit: number, deadline: number, log: Log) {
     tally[k] = (tally[k] ?? 0) + 1;
   });
   if (todo.length) log(`drafted: ${JSON.stringify(tally)}`);
+}
+
+/** Leads already in the campaign without follow-ups (a failed write) get them. */
+export async function backfillFollowUps(limit: number, deadline: number, log: Log) {
+  const todo = (await db().execute(sql`
+    select m.contact_id id from messages m
+    where m.step = 1 and m.pushed_at is not null
+      and not exists (select 1 from messages f where f.contact_id = m.contact_id and f.step = 4)
+    limit ${limit}`)) as unknown as { id: string }[];
+  let n = 0;
+  await pool(todo, 2, deadline, async (c) => {
+    if ((await draftFollowUps(c.id)).ok) n++;
+  });
+  if (todo.length) log(`follow-ups written for ${n} of ${todo.length} leads missing them`);
 }
 
 /* ── Push: drafts whose hold has passed ─────────────────────────────────── */
@@ -269,6 +283,8 @@ export async function hourlyRun(budgetMs: number) {
     await step("safety", () => healthCheck(log));
     if (!(await pausedState()).paused) {
       await step("push", () => pushDue(100, log));
+      await step("follow-ups", () => backfillFollowUps(5, deadline, log));
+      await step("sync follow-ups", () => syncFollowUps(200, log));
       await step("warm notes", () => draftWarmNotes(log));
       await step("write check-ins", () => writeDueCheckIns(log));
       await step("send notes", () => sendDueNotes(log));

@@ -1,8 +1,9 @@
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { agencies, agencyResearch, contacts, messages, samples } from "@/db/schema";
+import { agencies, agencyResearch, contacts, events, messages, samples } from "@/db/schema";
 import { env } from "@/env";
 import { followUpProblems, templateFollowUps, type FollowUps } from "./draft-rules";
+import { bodyHtml, campaignLeads, sequenceSteps, setCampaignSequence, setLeadVars } from "./instantly";
 import { askJson } from "./openrouter";
 import { OFFER_FACTS } from "./offer";
 import type { SampleResult } from "./platform";
@@ -128,6 +129,49 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
       })),
     );
   return { ok: true, template, notes };
+}
+
+/**
+ * Put each pushed lead's whole sequence on its Instantly lead, once (or again
+ * after a rewrite: a lead is re-synced when any of its messages is newer than
+ * its last sync).
+ */
+export async function syncFollowUps(limit: number, log: (l: string) => void) {
+  const rows = (await db().execute(sql`
+    select m.id, m.contact_id, m.subject, m.body, m.instantly_lead_id
+    from messages m
+    where m.step = 1 and m.instantly_lead_id is not null
+      and exists (select 1 from messages f where f.contact_id = m.contact_id and f.step = 4)
+      and not exists (
+        select 1 from events e where e.contact_id = m.contact_id and e.type = 'lead.vars_synced'
+          and e.at > (select max(created_at) from messages x where x.contact_id = m.contact_id and x.step <= 4))
+    limit ${limit}`)) as unknown as { id: string; contact_id: string; subject: string; body: string; instantly_lead_id: string }[];
+  let n = 0;
+  for (const r of rows) {
+    const vars = await followUpVars(r.contact_id, bodyHtml);
+    if (!vars) continue;
+    await setLeadVars(r.instantly_lead_id, { subject: r.subject, body_html: bodyHtml(r.body), message_id: r.id, ...vars });
+    await db().insert(events).values({ source: "bot", type: "lead.vars_synced", contactId: r.contact_id });
+    n++;
+  }
+  if (n) log(`follow-ups put on ${n} Instantly leads`);
+  return n;
+}
+
+/**
+ * Switch the campaign to the whole sequence — only once every active lead has
+ * all four emails, so Instantly can never send an empty one.
+ */
+export async function enableSequence(): Promise<string> {
+  const campaignId = env.INSTANTLY_CAMPAIGN_ID;
+  if (!campaignId || !env.SENDER_LEGAL) return "INSTANTLY_CAMPAIGN_ID and SENDER_LEGAL must be set.";
+  const leads = await campaignLeads(campaignId);
+  const active = leads.filter((l) => l.status === 1);
+  const lacking = active.filter((l) => !["body_2_html", "body_3_html", "body_4_html"].every((k) => String(l.payload?.[k] ?? "").trim()));
+  if (lacking.length) return `Not switched on: ${lacking.length} of ${active.length} active leads lack follow-ups.`;
+  const lines = (s: string) => s.replace(/\\n/g, "\n");
+  await setCampaignSequence(campaignId, sequenceSteps(lines(env.SENDER_SIGNOFF), lines(env.SENDER_LEGAL)));
+  return `Sequence on (days 0, 3, 7, 14) for ${active.length} active leads; ${leads.filter((l) => l.status === 3).length} already completed.`;
 }
 
 /** The follow-ups as Instantly custom variables (HTML), or null if any is missing. */

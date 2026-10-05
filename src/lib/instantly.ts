@@ -55,12 +55,21 @@ export async function verificationStatus(email: string): Promise<Verified> {
 /* ── Sending ─────────────────────────────────────────────────────────────── */
 
 async function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: headers(),
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
-  });
+  // A dropped connection is retried (twice, a few seconds apart); an answer from Instantly is not.
+  let res: Response | null = null;
+  for (let attempt = 0; !res; attempt++) {
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        method,
+        headers: headers(),
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 3_000 * (attempt + 1)));
+    }
+  }
   const data = (await res.json().catch(() => ({}))) as T & { message?: string; error?: string };
   if (!res.ok) throw new Error(`Instantly ${method} ${path.split("?")[0]} ${res.status}: ${data.message ?? data.error ?? ""}`);
   return data;
