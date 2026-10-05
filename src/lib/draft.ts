@@ -5,7 +5,7 @@ import { env } from "@/env";
 import { draftProblems, sameBusiness, sampleTargets, type SampleTarget } from "./draft-rules";
 import { askJson } from "./openrouter";
 import { OFFER_FACTS } from "./offer";
-import { makeSample, PlatformError, type Sample } from "./platform";
+import { makeSample, PlatformError, type Sample, type SampleResult } from "./platform";
 import type { Facts } from "./research";
 
 /**
@@ -128,34 +128,71 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
     await db().update(contacts).set({ writerModel: writer, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
   }
 
+  const { draft, notes, cost } = await writeFirst({ contact, agency, research, facts, kind: target.kind, result: sample.result, previewUrl: sample.previewUrl, writer });
+
+  const passed = notes.length === 0;
+  // A re-draft replaces the earlier one, never one Instantly already has.
+  await db()
+    .delete(messages)
+    .where(and(eq(messages.contactId, contact.id), eq(messages.step, 1), isNull(messages.pushedAt)));
+  await db().insert(messages).values({
+    contactId: contact.id,
+    writerModel: writer,
+    step: 1,
+    subject: draft.subject,
+    body: draft.body,
+    guardrail: { ok: passed, notes },
+    // The owner's window to stop it before it is pushed.
+    holdUntil: new Date(Date.now() + env.HOLD_HOURS * 3_600_000),
+  });
+  await setStatus(agency.id, passed ? "queued" : "needs_review");
+  return { ok: true, passed, notes, writer, sampleKind: target.kind, costUsd: cost };
+}
+
+type Contact = typeof contacts.$inferSelect;
+type Agency = typeof agencies.$inferSelect;
+type Research = typeof agencyResearch.$inferSelect;
+
+/** Write the first email around an audit and check it: rules, then the analysis model; one rewrite. */
+async function writeFirst(o: {
+  contact: Contact;
+  agency: Agency;
+  research: Research;
+  facts: Facts;
+  kind: string;
+  result: SampleResult;
+  previewUrl: string;
+  writer: string;
+}): Promise<{ draft: Draft; notes: string[]; cost: number }> {
+  const { contact, agency, research, facts, result } = o;
   const brief = [
     `First name: ${contact.firstName?.trim() || "(unknown)"}`,
     `Agency: ${agency.name} (${agency.website ?? agency.domain})`,
     `Research: ${research.summary ?? ""}`,
     `Services: ${(facts.services ?? []).join(", ") || "-"}; niches: ${(facts.niches ?? []).join(", ") || "-"}; location: ${facts.location ?? "-"}`,
-    `Uses GoHighLevel: ${facts.uses_gohighlevel ? "yes" : "no"}; resells white-label: ${facts.resells_white_label ? "yes" : "no"}`,
+    `Uses GoHighLevel: yes (every agency we write to does); resells white-label: ${facts.resells_white_label ? "yes" : "no"}`,
     ``,
-    `The audit (of ${target.kind === "own" ? "the agency's own listing" : "their client"} "${sample.result.title}", ${sample.result.address}):`,
-    `Score ${sample.result.score}/100. Verdict: ${sample.result.verdict}`,
-    ...sample.result.gaps.slice(0, 4).map((g) => `- ${g.label}: ${g.note}`),
-    sample.result.standing ? `Standing: ${sample.result.standing}` : "",
-    sample.result.rivalNote ? `Rivals: ${sample.result.rivalNote}` : "",
-    sample.result.opportunity ? `Opportunity: ${sample.result.opportunity}` : "",
-    `Link to the audit: ${sample.previewUrl}`,
+    `The audit (of ${o.kind === "own" ? "the agency's own listing" : "their client"} "${result.title}", ${result.address}):`,
+    `Score ${result.score}/100. Verdict: ${result.verdict}`,
+    ...(result.gaps ?? []).slice(0, 4).map((g) => `- ${g.label}: ${g.note}`),
+    result.standing ? `Standing: ${result.standing}` : "",
+    result.rivalNote ? `Rivals: ${result.rivalNote}` : "",
+    result.opportunity ? `Opportunity: ${result.opportunity}` : "",
+    `Link to the audit: ${o.previewUrl}`,
   ]
     .filter((l) => l !== "")
     .join("\n");
 
   let cost = 0;
-  let draft: Draft | null = null;
+  let draft: Draft = { subject: "", body: "" };
   let notes: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix: string = attempt > 0 ? `\n\nYour previous draft:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
-    const written = await askJson<Draft>({ model: writer, system: WRITER, user: brief + fix, maxTokens: 800 });
+    const written = await askJson<Draft>({ model: o.writer, system: WRITER, user: brief + fix, maxTokens: 800 });
     cost += written.usage.costUsd ?? 0;
     draft = { subject: String(written.data.subject ?? "").trim(), body: String(written.data.body ?? "").trim() };
 
-    notes = draftProblems(draft, sample.previewUrl);
+    notes = draftProblems(draft, o.previewUrl);
     if (notes.length === 0) {
       const checked = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
@@ -168,24 +205,45 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
     }
     if (notes.length === 0) break;
   }
+  return { draft, notes, cost };
+}
 
-  const passed = notes.length === 0;
-  // A re-draft replaces the earlier one, never one Instantly already has.
-  await db()
-    .delete(messages)
-    .where(and(eq(messages.contactId, contact.id), eq(messages.step, 1), isNull(messages.pushedAt)));
-  await db().insert(messages).values({
-    contactId: contact.id,
-    writerModel: writer,
-    step: 1,
-    subject: draft!.subject,
-    body: draft!.body,
-    guardrail: { ok: passed, notes },
-    // The owner's window to stop it before it is pushed.
-    holdUntil: new Date(Date.now() + env.HOLD_HOURS * 3_600_000),
+/**
+ * Write a first email again — already in Instantly but not yet sent — from the
+ * audit it was made with. The message is changed in place only if the new one
+ * passes; otherwise the old one stays. The caller updates the Instantly lead.
+ */
+export async function rewriteFirstEmail(messageId: string): Promise<{ ok: boolean; why?: string }> {
+  const [m] = await db().select().from(messages).where(eq(messages.id, messageId)).limit(1);
+  if (!m || m.step !== 1) return { ok: false, why: "no such first email" };
+  if (m.sentAt) return { ok: false, why: "already sent" };
+  const [row] = await db()
+    .select({ contact: contacts, agency: agencies })
+    .from(contacts)
+    .innerJoin(agencies, eq(agencies.id, contacts.agencyId))
+    .where(eq(contacts.id, m.contactId))
+    .limit(1);
+  const [research] = await db()
+    .select()
+    .from(agencyResearch)
+    .where(eq(agencyResearch.agencyId, row.agency.id))
+    .orderBy(desc(agencyResearch.version))
+    .limit(1);
+  const [sample] = await db().select().from(samples).where(eq(samples.contactId, m.contactId)).orderBy(desc(samples.createdAt)).limit(1);
+  if (!research || !sample) return { ok: false, why: "no research or audit" };
+  const { draft, notes } = await writeFirst({
+    contact: row.contact,
+    agency: row.agency,
+    research,
+    facts: research.facts as unknown as Facts,
+    kind: sample.kind,
+    result: sample.result as unknown as SampleResult,
+    previewUrl: sample.previewUrl,
+    writer: m.writerModel,
   });
-  await setStatus(agency.id, passed ? "queued" : "needs_review");
-  return { ok: true, passed, notes, writer, sampleKind: target.kind, costUsd: cost };
+  if (notes.length) return { ok: false, why: `kept the old one: ${notes.join("; ")}` };
+  await db().update(messages).set({ subject: draft.subject, body: draft.body, guardrail: { ok: true, notes: ["rewritten"] } }).where(eq(messages.id, m.id));
+  return { ok: true };
 }
 
 async function setStatus(agencyId: string, status: string) {

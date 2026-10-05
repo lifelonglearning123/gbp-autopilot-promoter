@@ -18,6 +18,7 @@
     "instantly:setup": "dotenv -e .env.local -- tsx scripts/instantly-setup.ts",
     "push": "dotenv -e .env.local -- tsx scripts/push.ts",
     "followups": "dotenv -e .env.local -- tsx scripts/followups.ts",
+    "rewrite-first": "dotenv -e .env.local -- tsx scripts/rewrite-first.ts",
     "send-test": "dotenv -e .env.local -- tsx scripts/send-test.ts",
     "import:history": "dotenv -e .env.local -- tsx scripts/import-instantly-history.ts",
     "db:counts": "dotenv -e .env.local -- tsx scripts/db-counts.ts",
