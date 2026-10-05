@@ -199,6 +199,42 @@ export async function campaignLeads(campaignId: string): Promise<CampaignLead[]>
   return all;
 }
 
+/* ── One-to-one: replies in a lead's thread, and taking a lead out ─────── */
+
+export type SentEmail = { id: string; eaccount: string; subject: string; timestamp_email?: string; campaign_id?: string };
+
+/** The campaign emails a lead has been sent, newest first. */
+export async function emailsSentTo(leadEmail: string, campaignId: string): Promise<SentEmail[]> {
+  const q = new URLSearchParams({ lead: leadEmail, campaign_id: campaignId, email_type: "sent", limit: "20" });
+  const r = await api<{ items?: SentEmail[] }>("GET", `/emails?${q}`);
+  return r.items ?? [];
+}
+
+/** A reply in the lead's thread, from the mailbox that wrote to them. */
+export async function replyInThread(o: { replyToId: string; eaccount: string; subject: string; html: string }) {
+  return api<{ id: string }>("POST", "/emails/reply", {
+    reply_to_uuid: o.replyToId,
+    eaccount: o.eaccount,
+    subject: o.subject,
+    body: { html: o.html },
+  });
+}
+
+const TAKEN_OUT = "GBP Autopilot — taken out of the cold sequence";
+let takenOutList: string | null = null;
+
+/**
+ * Stop a lead's remaining cold steps, keeping the lead and its history: it is
+ * moved from the campaign to a list (Instantly has no "stop this lead").
+ */
+export async function takeOutOfCampaign(leadId: string, campaignId: string) {
+  if (!takenOutList) {
+    const found = await api<{ items?: { id: string; name: string }[] }>("GET", `/lead-lists?limit=100&search=${encodeURIComponent(TAKEN_OUT)}`);
+    takenOutList = found.items?.find((l) => l.name === TAKEN_OUT)?.id ?? (await api<{ id: string }>("POST", "/lead-lists", { name: TAKEN_OUT })).id;
+  }
+  return api<{ id: string }>("POST", "/leads/move", { ids: [leadId], campaign: campaignId, to_list_id: takenOutList });
+}
+
 /** Replace a lead's custom variables (always the full set). */
 export async function setLeadVars(leadId: string, vars: Record<string, string>) {
   return api<{ id: string }>("PATCH", `/leads/${leadId}`, { custom_variables: vars });

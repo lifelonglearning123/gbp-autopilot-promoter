@@ -12,6 +12,7 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
+import { draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
 
 /**
  * The work the hourly run does, each step bounded so a run fits its time.
@@ -258,6 +259,9 @@ export async function hourlyRun(budgetMs: number) {
   };
 
   await step("replies", () => handleReplies(log));
+  // Stopping and scheduling never reach anyone, so they run even while paused.
+  await step("claimed", () => stopClaimed(log));
+  await step("check-ins", () => scheduleCheckIns(log));
   const paused = await pausedState();
   if (paused.paused) {
     log(`paused (${paused.reason ?? "by owner"}): nothing pushed or drafted`);
@@ -265,6 +269,9 @@ export async function hourlyRun(budgetMs: number) {
     await step("safety", () => healthCheck(log));
     if (!(await pausedState()).paused) {
       await step("push", () => pushDue(100, log));
+      await step("warm notes", () => draftWarmNotes(log));
+      await step("write check-ins", () => writeDueCheckIns(log));
+      await step("send notes", () => sendDueNotes(log));
       await step("intake", () => dailyIntake(log));
       await step("verify", () => verifySome(50, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
@@ -279,9 +286,11 @@ export async function hourlyRun(budgetMs: number) {
 
 export async function waitingDrafts() {
   return (await db().execute(sql`
-    select m.id, m.subject, m.hold_until, a.name agency, a.fit_score
+    select m.id, m.hold_until, a.name agency, a.fit_score,
+           case m.step when 1 then m.subject when 10 then 'warm note (opened the audit)' when 20 then 'check-in ("not now" earlier)' end subject
     from messages m join contacts c on c.id = m.contact_id join agencies a on a.id = c.agency_id
-    where m.pushed_at is null and m.stopped_at is null and (m.guardrail->>'ok')::boolean
+    where m.step in (1, 10, 20) and m.pushed_at is null and m.sent_at is null and m.stopped_at is null
+      and (m.guardrail->>'ok')::boolean
     order by m.hold_until nulls first`)) as unknown as { id: string; subject: string; hold_until: string | null; agency: string; fit_score: number | null }[];
 }
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import { agencies, agencyResearch, contacts, messages, samples } from "@/db/schema";
 import { env } from "@/env";
@@ -114,7 +114,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
     : draft!;
 
   // Replace earlier unsent follow-ups for this contact.
-  await db().delete(messages).where(and(eq(messages.contactId, contactId), gte(messages.step, 2), isNull(messages.sentAt)));
+  await db().delete(messages).where(and(eq(messages.contactId, contactId), gte(messages.step, 2), lte(messages.step, 4), isNull(messages.sentAt)));
   await db()
     .insert(messages)
     .values(

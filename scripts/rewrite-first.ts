@@ -60,7 +60,8 @@ async function main() {
   const todo = (await db().execute(sql`
     select m.id, m.contact_id, m.instantly_lead_id, a.name from messages m
     join contacts c on c.id = m.contact_id join agencies a on a.id = c.agency_id
-    where m.step = 1 and m.pushed_at is not null and m.sent_at is null and m.instantly_lead_id is not null`)) as unknown as {
+    where m.step = 1 and m.pushed_at is not null and m.sent_at is null and m.instantly_lead_id is not null
+      and not coalesce(m.guardrail->'notes' ? 'rewritten', false)`)) as unknown as {
     id: string;
     contact_id: string;
     instantly_lead_id: string;
