@@ -136,7 +136,7 @@ export async function createFirstEmailCampaign(name: string, accounts: string[])
     },
     sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body: "{{body_html}}" }] }] }], // sign-off: setCampaignCopy
     email_list: accounts,
-    daily_limit: 30,
+    daily_limit: 50,
     stop_on_reply: true,
     stop_for_company: true,
     open_tracking: false,
