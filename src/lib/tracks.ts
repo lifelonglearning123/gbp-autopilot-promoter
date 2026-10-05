@@ -7,7 +7,7 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { OFFER_FACTS } from "./offer";
 import { askJson } from "./openrouter";
-import type { SampleResult } from "./platform";
+import { shortClaimUrl, type SampleResult } from "./platform";
 
 /**
  * After the cold sequence: reacting to what each agency does.
@@ -113,7 +113,7 @@ export async function draftWarmNotes(log: Log) {
       .where(eq(agencyResearch.agencyId, t.agency_id))
       .orderBy(desc(agencyResearch.version))
       .limit(1);
-    const claim = sample.claimUrl ?? sample.previewUrl;
+    const claim = shortClaimUrl(sample) ?? sample.previewUrl;
     const brief = `First name: ${t.first_name ?? "(unknown)"}\nAgency: ${t.agency}\nResearch: ${research?.summary ?? ""}\nThe audit sent: "${result.title}", score ${result.score}/100.\nClaim link: ${claim}`;
     const body = await writeChecked(WARM, brief, [claim, sample.previewUrl]);
     if (!body) {

@@ -60,6 +60,15 @@ export function makeSample(req: SampleRequest): Promise<Sample> {
   return call<Sample>("/api/bot/sample", req);
 }
 
+/**
+ * The claim link to put in an email: the platform's short /c/<sample token>,
+ * which redirects to the signed signup link stored with the sample (that one
+ * is several hundred characters). Null when the sample has no claim link.
+ */
+export function shortClaimUrl(sample: { claimUrl: string | null; platformToken: string }): string | null {
+  return sample.claimUrl ? `${env.PLATFORM_URL.replace(/\/$/, "")}/c/${sample.platformToken}` : null;
+}
+
 /** A pre-filled signup link on its own (30 days). */
 export function claimLink(req: {
   agencyName: string;

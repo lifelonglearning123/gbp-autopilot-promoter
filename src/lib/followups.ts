@@ -5,6 +5,7 @@ import { env } from "@/env";
 import { followUpProblems, templateFollowUps, type FollowUps } from "./draft-rules";
 import { bodyHtml, campaignLeads, sequenceSteps, setCampaignSequence, setLeadVars } from "./instantly";
 import { askJson } from "./openrouter";
+import { shortClaimUrl } from "./platform";
 import { OFFER_FACTS } from "./offer";
 import type { SampleResult } from "./platform";
 import type { Facts } from "./research";
@@ -79,7 +80,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
     result.rivalNote ? `Rivals: ${result.rivalNote}` : "",
     result.opportunity ? `Opportunity: ${result.opportunity}` : "",
     `Audit link: ${sample.previewUrl}`,
-    `Claim link: ${sample.claimUrl ?? "(none)"}`,
+    `Claim link: ${shortClaimUrl(sample) ?? "(none)"}`,
     ``,
     `The first email (already sent):\nSubject: ${first.subject}\n\n${first.body}`,
   ]
@@ -103,7 +104,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
       body_3: String(written.data.body_3 ?? "").trim(),
       body_4: String(written.data.body_4 ?? "").trim(),
     };
-    notes = followUpProblems(draft, sample.previewUrl, sample.claimUrl);
+    notes = followUpProblems(draft, sample.previewUrl, shortClaimUrl(sample));
     if (notes.length === 0) {
       const checked = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
@@ -118,7 +119,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
 
   const template = notes.length > 0;
   const final = template
-    ? templateFollowUps({ firstName: contact.firstName, finding: result.gaps?.[1]?.note ?? result.gaps?.[0]?.note ?? null, previewUrl: sample.previewUrl, claimUrl: sample.claimUrl })
+    ? templateFollowUps({ firstName: contact.firstName, finding: result.gaps?.[1]?.note ?? result.gaps?.[0]?.note ?? null, previewUrl: sample.previewUrl, claimUrl: shortClaimUrl(sample) })
     : draft!;
 
   // Replace earlier unsent follow-ups for this contact.
@@ -163,6 +164,25 @@ export async function syncFollowUps(limit: number, log: (l: string) => void) {
   }
   if (n) log(`follow-ups put on ${n} Instantly leads`);
   return n;
+}
+
+/**
+ * Swap the long signed claim links in written-but-unsent emails for the
+ * platform's short /c/<token> links, then mark those leads for a fresh sync.
+ */
+export async function shortenClaimLinks(): Promise<number> {
+  const base = env.PLATFORM_URL.replace(/\/$/, "");
+  const changed = (await db().execute(sql`
+    update messages m set body = replace(m.body, s.claim_url, ${base} || '/c/' || s.platform_token)
+    from samples s
+    where s.contact_id = m.contact_id and s.claim_url is not null
+      and m.sent_at is null and position(s.claim_url in m.body) > 0
+    returning m.contact_id`)) as unknown as { contact_id: string }[];
+  const contactIds = [...new Set(changed.map((c) => c.contact_id))];
+  for (const id of contactIds) {
+    await db().execute(sql`delete from events where contact_id = ${id} and type = 'lead.vars_synced'`);
+  }
+  return changed.length;
 }
 
 /**
