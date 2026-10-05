@@ -152,6 +152,10 @@ export const messages = pgTable(
     subject: text("subject"),
     body: text("body").notNull(),
     guardrail: jsonb("guardrail").$type<{ ok: boolean; notes: string[] }>(),
+    /** Not pushed before this: the owner's window to stop it (HOLD_HOURS after drafting). */
+    holdUntil: timestamp("hold_until", { withTimezone: true }),
+    /** The owner stopped this draft; it is never pushed. */
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
     /** Handed to Instantly as a lead in this campaign; Instantly decides when it goes. */
     instantlyCampaignId: text("instantly_campaign_id"),
     instantlyLeadId: text("instantly_lead_id"),
@@ -186,6 +190,8 @@ export const replies = pgTable("replies", {
   classification: text("classification"),
   confidence: real("confidence"),
   handled: boolean("handled").notNull().default(false),
+  /** When the owner was told about it (interested replies). */
+  alertedAt: timestamp("alerted_at", { withTimezone: true }),
   escalated: boolean("escalated").notNull().default(false),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -225,6 +231,13 @@ export const suppression = pgTable(
   },
   (t) => [uniqueIndex("suppression_email_idx").on(t.email), index("suppression_domain_idx").on(t.domain)],
 );
+
+/** Switches the owner controls, e.g. "paused". One row per key. */
+export const controls = pgTable("controls", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export type Agency = typeof agencies.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;

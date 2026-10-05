@@ -8,6 +8,7 @@ import { signedByPlatform } from "../src/lib/platform";
 import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
+import { actionLink, signatureOk } from "../src/lib/links";
 import { countryOf, draftProblems, pickSampleTarget, sameBusiness, sampleTargets, townOf } from "../src/lib/draft-rules";
 
 let passed = 0;
@@ -148,6 +149,19 @@ check("an Instantly event is taken only with our secret", () => {
   assert.equal(webhookSecretOk("s3cre", "s3cret"), false);
   assert.equal(webhookSecretOk(null, "s3cret"), false);
   assert.equal(webhookSecretOk("anything", undefined), false);
+});
+
+console.log("\nOwner's links");
+check("a stop / pause link works only with its own signature", () => {
+  process.env.ACTION_SECRET = "test-secret";
+  process.env.APP_URL = "https://x.io";
+  const url = new URL(actionLink("stop", "abc"));
+  const s = url.searchParams.get("s");
+  assert.equal(signatureOk("stop", "abc", s), true);
+  assert.equal(signatureOk("stop", "abd", s), false, "another draft");
+  assert.equal(signatureOk("pause", "abc", s), false, "another action");
+  assert.equal(signatureOk("delete", "abc", s), false, "not an action");
+  assert.equal(signatureOk("stop", "abc", null), false);
 });
 
 console.log(`\n${passed} checks passed`);

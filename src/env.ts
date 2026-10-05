@@ -46,6 +46,18 @@ const schema = z.object({
   /** This app's public address, for webhooks, e.g. https://promoter.macaws.ai */
   APP_URL: optional,
   TRIGGER_SECRET_KEY: optional,
+
+  // Running on its own, with the owner informed and in control.
+  /** Who is told what is going on, and can stop it. Alerts go by email through GHL. */
+  OWNER_EMAIL: z.string().default("chao@macaws.ai"),
+  /** Hours a new draft waits for the owner's veto before it is pushed. */
+  HOLD_HOURS: z.coerce.number().default(24),
+  /** Vercel Cron sends it as a bearer token. */
+  CRON_SECRET: optional,
+  /** Signs the stop / pause links in emails. */
+  ACTION_SECRET: optional,
+  /** The dashboard's password. */
+  DASHBOARD_PASSWORD: optional,
 });
 
 type Env = z.infer<typeof schema>;

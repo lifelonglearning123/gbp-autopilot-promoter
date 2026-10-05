@@ -21,6 +21,7 @@
     "import:history": "dotenv -e .env.local -- tsx scripts/import-instantly-history.ts",
     "db:counts": "dotenv -e .env.local -- tsx scripts/db-counts.ts",
     "check:keys": "dotenv -e .env.local -- tsx scripts/check-keys.ts",
+    "vercel:env": "node scripts/push-env-to-vercel.mjs",
     "platform:ping": "dotenv -e .env.local -- tsx scripts/platform-ping.ts"
   },
   "dependencies": {

@@ -178,6 +178,8 @@ export async function draftFirstEmail(contactId: string): Promise<DraftOutcome> 
     subject: draft!.subject,
     body: draft!.body,
     guardrail: { ok: passed, notes },
+    // The owner's window to stop it before it is pushed.
+    holdUntil: new Date(Date.now() + env.HOLD_HOURS * 3_600_000),
   });
   await setStatus(agency.id, passed ? "queued" : "needs_review");
   return { ok: true, passed, notes, writer, sampleKind: target.kind, costUsd: cost };
