@@ -141,7 +141,7 @@ check("an audit of a different business than asked for is caught", () => {
 
 console.log("\nSending");
 check("a draft becomes safe HTML with its line breaks", () => {
-  assert.equal(bodyHtml("Hi Jo,\n\nA & B <c>\r\nhttps://x.io/s/1\n"), "Hi Jo,<br/><br/>A &amp; B &lt;c&gt;<br/>https://x.io/s/1");
+  assert.equal(bodyHtml("Hi Jo,\n\nA & B <c>\r\nhttps://x.io/s/1\n"), "<div>Hi Jo,</div><div><br /></div><div>A &amp; B &lt;c&gt;</div><div>https://x.io/s/1</div>");
 });
 check("an Instantly event is taken only with our secret", () => {
   assert.equal(webhookSecretOk("s3cret", "s3cret"), true);

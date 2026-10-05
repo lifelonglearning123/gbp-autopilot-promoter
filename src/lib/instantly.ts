@@ -69,7 +69,12 @@ async function api<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unk
 /** A draft's plain text as the HTML Instantly sends: escaped, paragraphs and line breaks kept. */
 export function bodyHtml(text: string): string {
   const esc = text.trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return esc.replace(/\r\n/g, "\n").replace(/\n/g, "<br/>");
+  // One <div> per line, an empty line as <div><br /></div>: Instantly's editor
+  // strips bare text and runs of <br/>.
+  return esc
+    .split(/\r?\n/)
+    .map((line) => (line.trim() ? `<div>${line}</div>` : "<div><br /></div>"))
+    .join("");
 }
 
 /** Does a webhook carry our secret? Instantly signs nothing, so we set the header ourselves. */
@@ -146,14 +151,8 @@ export async function createFirstEmailCampaign(name: string, accounts: string[])
  * and how to stop more).
  */
 export function campaignBody(signoff: string, legal: string): string {
-  return [
-    "{{body_html}}",
-    "",
-    bodyHtml(signoff),
-    "",
-    bodyHtml(legal),
-    'Not relevant? Reply "remove" and I will take you off this list straight away.',
-  ].join("<br/>");
+  const footer = `${signoff}\n\n${legal}\nNot relevant? Reply "remove" and I will take you off this list straight away.`;
+  return `<div>{{body_html}}</div><div><br /></div>${bodyHtml(footer)}`;
 }
 
 export async function setCampaignCopy(campaignId: string, body: string) {
