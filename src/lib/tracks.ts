@@ -74,13 +74,13 @@ async function writeChecked(system: string, brief: string, allowed: string[]): P
 }
 
 /** The lead's Instantly id in the main campaign, from its first email. */
-async function leadIdOf(contactId: string): Promise<string | null> {
+async function leadOf(contactId: string): Promise<{ leadId: string; campaignId: string } | null> {
   const [m] = await db()
-    .select({ id: messages.instantlyLeadId })
+    .select({ leadId: messages.instantlyLeadId, campaignId: messages.instantlyCampaignId })
     .from(messages)
     .where(and(eq(messages.contactId, contactId), eq(messages.step, 1)))
     .limit(1);
-  return m?.id ?? null;
+  return m?.leadId && m.campaignId ? { leadId: m.leadId, campaignId: m.campaignId } : null;
 }
 
 async function noteOnce(type: string, contactId: string, agencyId: string, payload: Record<string, unknown> = {}) {
@@ -145,8 +145,6 @@ export async function draftWarmNotes(log: Log) {
 /* ── Claimed their account → out of the cold sequence ───────────────────── */
 
 export async function stopClaimed(log: Log) {
-  const campaignId = env.INSTANTLY_CAMPAIGN_ID;
-  if (!campaignId) return;
   const todo = (await db().execute(sql`
     select c.id contact_id, a.id agency_id, a.name agency
     from agencies a join contacts c on c.agency_id = a.id
@@ -155,9 +153,9 @@ export async function stopClaimed(log: Log) {
       and not exists (select 1 from events e where e.contact_id = c.id and e.type = 'lead.taken_out')
     limit 20`)) as unknown as { contact_id: string; agency_id: string; agency: string }[];
   for (const t of todo) {
-    const leadId = await leadIdOf(t.contact_id);
-    if (!leadId) continue;
-    await takeOutOfCampaign(leadId, campaignId);
+    const lead = await leadOf(t.contact_id);
+    if (!lead) continue;
+    await takeOutOfCampaign(lead.leadId, lead.campaignId);
     await noteOnce("lead.taken_out", t.contact_id, t.agency_id, { why: "claimed their account" });
     await tellOwner(
       `${t.agency} claimed their account`,
@@ -213,8 +211,6 @@ export async function writeDueCheckIns(log: Log) {
 /* ── Send one-to-one notes whose hold has ended ─────────────────────────── */
 
 export async function sendDueNotes(log: Log) {
-  const campaignId = env.INSTANTLY_CAMPAIGN_ID;
-  if (!campaignId) return;
   const due = (await db().execute(sql`
     select m.id, m.step, m.body, m.contact_id, c.email, a.id agency_id, a.name agency
     from messages m join contacts c on c.id = m.contact_id join agencies a on a.id = c.agency_id
@@ -231,14 +227,15 @@ export async function sendDueNotes(log: Log) {
         continue;
       }
     }
-    const [first] = await emailsSentTo(t.email, campaignId);
+    const lead = await leadOf(t.contact_id);
+    if (!lead) continue;
+    const [first] = await emailsSentTo(t.email, lead.campaignId);
     if (!first) continue; // the first email has not gone yet: wait
     const subject = first.subject.startsWith("Re:") ? first.subject : `Re: ${first.subject}`;
     await replyInThread({ replyToId: first.id, eaccount: first.eaccount, subject, html: bodyHtml(t.body + footer()) });
     await db().update(messages).set({ sentAt: new Date() }).where(eq(messages.id, t.id));
     if (t.step === STEP_WARM) {
-      const leadId = await leadIdOf(t.contact_id);
-      if (leadId) await takeOutOfCampaign(leadId, campaignId).catch(() => {});
+      await takeOutOfCampaign(lead.leadId, lead.campaignId).catch(() => {});
       await noteOnce("lead.taken_out", t.contact_id, t.agency_id, { why: "warm note sent" });
     }
     log(`${t.step === STEP_WARM ? "warm note" : "check-in"} sent to ${t.agency}`);

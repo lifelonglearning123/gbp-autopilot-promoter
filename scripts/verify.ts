@@ -10,6 +10,7 @@ import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
 import { actionLink, signatureOk } from "../src/lib/links";
 import { followUpProblems, templateFollowUps } from "../src/lib/draft-rules";
+import { emailsIn, instagramHandle, messageLink, phonesIn, sortLinks } from "../src/lib/creator-rules";
 import { sequenceSteps } from "../src/lib/instantly";
 import { countryOf, draftProblems, pickSampleTarget, sameBusiness, sampleTargets, townOf } from "../src/lib/draft-rules";
 
@@ -176,6 +177,29 @@ check("the sequence runs day 0, 3, 7, 14, follow-ups in the same thread", () => 
   assert.deepEqual(steps.map((s) => s.delay), [3, 4, 7, 0]);
   assert.deepEqual(steps.map((s) => s.variants[0].subject), ["{{subject}}", "", "", ""]);
   assert.ok(steps[2].variants[0].body.includes("{{body_3_html}}"));
+});
+
+console.log("\nYouTube creators");
+check("a channel description's links are sorted by network; affiliate links are not their site", () => {
+  const d = `My agency: https://www.acme-local.com\nIG https://instagram.com/acme.local/ \nJoin https://www.skool.com/gbp-pros\nTry HighLevel free: https://www.gohighlevel.com/?fp_ref=acme\nbook https://calendly.com/acme/15min`;
+  const l = sortLinks(d);
+  assert.equal(l.website, "https://www.acme-local.com");
+  assert.equal(l.instagram, "https://instagram.com/acme.local/");
+  assert.equal(l.skool, "https://www.skool.com/gbp-pros");
+  assert.equal(l.calendar, "https://calendly.com/acme/15min");
+  assert.ok(!Object.values(l).some((u) => u.includes("gohighlevel")), "an affiliate link is not their website");
+});
+check("emails and phone numbers are read from text; prices and dates are not phones", () => {
+  assert.deepEqual(emailsIn("Business inquiries: Jo@Acme-Local.com or logo@2x.png"), ["jo@acme-local.com"]);
+  assert.deepEqual(phonesIn("Call us: (555) 123-4567"), ["(555) 123-4567"]);
+  assert.deepEqual(phonesIn("WhatsApp +44 7700 900123"), ["+44 7700 900123"]);
+  assert.deepEqual(phonesIn("Only $1,497 until 2026-10-05, 30000 views"), []);
+});
+check("the tap-to-message link for each network", () => {
+  assert.equal(instagramHandle("https://www.instagram.com/jo.local/?hl=en"), "jo.local");
+  assert.equal(instagramHandle("https://www.instagram.com/p/abc123/"), null);
+  assert.equal(messageLink("instagram", "https://instagram.com/jo.local"), "https://ig.me/m/jo.local");
+  assert.equal(messageLink("phone", "+44 7700 900123"), "tel:+447700900123");
 });
 
 console.log("\nOwner's links");

@@ -58,6 +58,18 @@ const schema = z.object({
   ACTION_SECRET: optional,
   /** The dashboard's password. */
   DASHBOARD_PASSWORD: optional,
+
+  // YouTube creators posting about local SEO / Google Business Profile.
+  /** Google Cloud API key with the YouTube Data API v3 enabled. */
+  YOUTUBE_API_KEY: optional,
+  /** What to search for, separated by "|". */
+  YOUTUBE_QUERIES: z
+    .string()
+    .default(
+      "google business profile|google business profile optimization|GMB ranking|google maps ranking|local SEO|local SEO for agencies|gohighlevel local SEO|google business profile agency|rank on google maps|google business profile reviews",
+    ),
+  /** The Instantly campaign for creators (its own copy and results). */
+  INSTANTLY_YT_CAMPAIGN_ID: optional,
 });
 
 type Env = z.infer<typeof schema>;

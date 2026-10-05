@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import { agencies, agencyResearch, contacts, messages, samples } from "@/db/schema";
 import { env } from "@/env";
 import { draftProblems, sameBusiness, sampleTargets, type SampleTarget } from "./draft-rules";
+import { creatorContext } from "./creators";
 import { askJson } from "./openrouter";
 import { OFFER_FACTS } from "./offer";
 import { makeSample, PlatformError, type Sample, type SampleResult } from "./platform";
@@ -27,7 +28,7 @@ What we offer them, which the reader must understand by the end of the email: a 
 Return ONLY a JSON object: {"subject": string, "body": string}.
 - subject: under 50 characters, lower-key, no exclamation marks, no capitals for emphasis. It should hint at the white-label offer or the audit, not be a vague teaser.
 - body: plain text, UK English, 70-120 words, short paragraphs. Greet by first name if given, else "Hi there".
-- Open with one specific, true thing about their agency from the research, as the reason this offer suits them.
+- Open with one specific, true thing about their agency from the research, as the reason this offer suits them. If they run a YouTube channel (given below), open instead with one of their recent videos, by its topic, naturally (not "I watched your video", no flattery).
 - Then say plainly, in one or two sentences, what we offer: white-label Google Business Profile auditing and optimisation for their local business clients, under their brand, that they can resell. Use the words "white-label" and "Google Business Profile" (or "Google listing"). Say in a few words that it works with the GoHighLevel they already use (e.g. findings land in their GHL sub-accounts as tasks).
 - Then the sample audit as proof: whose listing it is, one or two concrete findings from it, and the link, written out exactly once on its own line. Say it is already in their brand.
 - One soft question at the end, about whether they would offer this to their clients.
@@ -165,6 +166,7 @@ async function writeFirst(o: {
   writer: string;
 }): Promise<{ draft: Draft; notes: string[]; cost: number }> {
   const { contact, agency, research, facts, result } = o;
+  const channel = await creatorContext(agency.id);
   const brief = [
     `First name: ${contact.firstName?.trim() || "(unknown)"}`,
     `Agency: ${agency.name} (${agency.website ?? agency.domain})`,
@@ -179,6 +181,8 @@ async function writeFirst(o: {
     result.rivalNote ? `Rivals: ${result.rivalNote}` : "",
     result.opportunity ? `Opportunity: ${result.opportunity}` : "",
     `Link to the audit: ${o.previewUrl}`,
+    channel ? `
+${channel}` : "",
   ]
     .filter((l) => l !== "")
     .join("\n");

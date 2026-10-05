@@ -39,6 +39,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   return (
     <main style={box}>
       <h1 style={{ fontSize: 24, marginBottom: 4 }}>GBP Autopilot outreach</h1>
+      <p style={{ marginTop: 0 }}>
+        <a href="/queue">DM queue{n.dms_due ? ` (${n.dms_due} due)` : ""}</a>
+      </p>
 
       <div style={{ ...card, background: paused.paused ? "#fff4e5" : "#eefaf1" }}>
         <form action={dashboardAction} style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -64,6 +67,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           ["Signed up", n.total_signups],
           ["To research", n.to_research],
           ["Failed the check", n.needs_review],
+          ["YouTube channels found", n.yt_found],
+          ["YouTube agencies to reach", n.yt_agencies],
+          ["YouTube educators", n.yt_educators],
+          ["DMs / calls due", n.dms_due],
         ].map(([label, v]) => (
           <div key={label as string}>
             <div style={{ color: "#5b5f6b", fontSize: 13 }}>{label}</div>

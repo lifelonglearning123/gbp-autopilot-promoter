@@ -130,7 +130,7 @@ export async function setCampaignAccounts(campaignId: string, accounts: string[]
  * Created as a draft: nothing is sent until it is activated in Instantly.
  * Weekdays 9-5 UK time (Instantly has no Europe/London; Isle of Man keeps UK time).
  */
-export async function createFirstEmailCampaign(name: string, accounts: string[]): Promise<{ id: string; status: number }> {
+export async function createFirstEmailCampaign(name: string, accounts: string[], dailyLimit = 50): Promise<{ id: string; status: number }> {
   return api("POST", "/campaigns", {
     name,
     campaign_schedule: {
@@ -145,7 +145,7 @@ export async function createFirstEmailCampaign(name: string, accounts: string[])
     },
     sequences: [{ steps: [{ type: "email", delay: 0, variants: [{ subject: "{{subject}}", body: "{{body_html}}" }] }] }], // sign-off: setCampaignCopy
     email_list: accounts,
-    daily_limit: 50,
+    daily_limit: dailyLimit,
     stop_on_reply: true,
     stop_for_company: true,
     open_tracking: false,

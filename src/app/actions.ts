@@ -8,6 +8,11 @@ import { env } from "@/env";
 import { pauseAll, resumeAll } from "@/lib/control";
 import { signatureOk } from "@/lib/links";
 import { stopDraft } from "@/lib/pipeline";
+import { eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { outreachTasks } from "@/db/schema";
+import { closeAnsweredTasks } from "@/lib/creators";
+import { completeGhlTask } from "@/lib/ghl-crm";
 
 /**
  * What the owner can do: from a signed email link (after a confirm click) or
@@ -46,6 +51,19 @@ export async function confirmLink(form: FormData) {
   if (!signatureOk(action, id, String(form.get("s") ?? ""))) redirect("/act?done=bad");
   await act(action, id, "email link");
   redirect(`/act?done=${action}`);
+}
+
+/** From the DM queue: sent, they replied (stops everything else to them), or skip. */
+export async function queueAction(form: FormData) {
+  if (!(await isOwner())) redirect("/dashboard");
+  const id = String(form.get("id") ?? "");
+  const a = String(form.get("a") ?? "");
+  const now = new Date();
+  const set = a === "done" ? { doneAt: now } : a === "replied" ? { doneAt: now, repliedAt: now } : { skippedAt: now };
+  await db().update(outreachTasks).set(set).where(eq(outreachTasks.id, id));
+  if (a === "replied") await closeAnsweredTasks();
+  await completeGhlTask(id).catch(() => {});
+  revalidatePath("/queue");
 }
 
 /** From the dashboard: the login is the permission. */

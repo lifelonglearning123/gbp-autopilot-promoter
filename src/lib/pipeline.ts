@@ -12,6 +12,8 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
+import { closeAnsweredTasks, discoverCreators, enrichCreators, handOverCreators, qualifyCreators, queueTasks } from "./creators";
+import { syncCreatorsToGhl } from "./ghl-crm";
 import { draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
 
 /**
@@ -112,8 +114,14 @@ export async function backfillFollowUps(limit: number, deadline: number, log: Lo
 
 /* ── Push: drafts whose hold has passed ─────────────────────────────────── */
 
+/** Push due emails: the GHL list to the main campaign, YouTube creators to theirs. */
 export async function pushDue(limit: number, log: Log): Promise<number> {
-  const campaignId = env.INSTANTLY_CAMPAIGN_ID;
+  const main = await pushInto(env.INSTANTLY_CAMPAIGN_ID, false, limit, log);
+  const yt = await pushInto(env.INSTANTLY_YT_CAMPAIGN_ID, true, limit, log);
+  return main + yt;
+}
+
+async function pushInto(campaignId: string | undefined, youtube: boolean, limit: number, log: Log): Promise<number> {
   if (!campaignId) return 0;
   const ready = (await db().execute(sql`
     select m.id, m.subject, m.body, c.email, c.first_name, c.last_name, a.name agency, a.website
@@ -124,6 +132,7 @@ export async function pushDue(limit: number, log: Log): Promise<number> {
       and (m.guardrail->>'ok')::boolean
       and (m.hold_until is null or m.hold_until <= now())
       and c.email_status = 'valid' and a.status = 'queued'
+      and (c.source like 'youtube:%') = ${youtube}
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     order by m.created_at
     limit ${limit}`)) as unknown as {
@@ -171,7 +180,7 @@ export async function pushDue(limit: number, log: Log): Promise<number> {
     const r = ready[lead.index];
     if (r) await db().update(messages).set({ instantlyCampaignId: campaignId, instantlyLeadId: lead.id, pushedAt: now }).where(eq(messages.id, r.id));
   }
-  log(`pushed ${res.created_leads?.length ?? 0} of ${ready.length} into the campaign`);
+  log(`pushed ${res.created_leads?.length ?? 0} of ${ready.length} into the ${youtube ? "YouTube creators'" : "main"} campaign`);
   return res.created_leads?.length ?? 0;
 }
 
@@ -276,6 +285,7 @@ export async function hourlyRun(budgetMs: number) {
   // Stopping and scheduling never reach anyone, so they run even while paused.
   await step("claimed", () => stopClaimed(log));
   await step("check-ins", () => scheduleCheckIns(log));
+  await step("answered DMs", () => closeAnsweredTasks());
   const paused = await pausedState();
   if (paused.paused) {
     log(`paused (${paused.reason ?? "by owner"}): nothing pushed or drafted`);
@@ -289,6 +299,13 @@ export async function hourlyRun(budgetMs: number) {
       await step("write check-ins", () => writeDueCheckIns(log));
       await step("send notes", () => sendDueNotes(log));
       await step("intake", () => dailyIntake(log));
+      // YouTube creators: find, sort, collect details, hand over, write DMs, into GHL.
+      await step("youtube find", () => discoverCreators(log));
+      await step("youtube qualify", () => qualifyCreators(20, log));
+      await step("youtube details", () => enrichCreators(15, log));
+      await step("youtube hand over", () => handOverCreators(30, log));
+      await step("youtube DMs", () => queueTasks(10, log));
+      await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
       await step("verify", () => verifySome(50, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
       await step("draft", () => draftSome(20, deadline, log));

@@ -232,6 +232,71 @@ export const suppression = pgTable(
   (t) => [uniqueIndex("suppression_email_idx").on(t.email), index("suppression_domain_idx").on(t.domain)],
 );
 
+/**
+ * A YouTube channel posting about local SEO / Google Business Profile.
+ * Found by search, qualified by the analysis model, its public contact
+ * details collected (each with where it was published). A creator with an
+ * email becomes an agency + contact and goes through the same pipeline.
+ */
+export const creators = pgTable(
+  "creators",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    channelId: text("channel_id").notNull(),
+    title: text("title").notNull(),
+    handle: text("handle"),
+    country: text("country"),
+    subscribers: integer("subscribers"),
+    videoCount: integer("video_count"),
+    description: text("description"),
+    /** Recent uploads: what the outreach can mention. */
+    recentVideos: jsonb("recent_videos").$type<{ id: string; title: string; publishedAt: string }[]>().notNull().default([]),
+    /** What found it, e.g. the search phrase. */
+    foundBy: text("found_by"),
+    /** new → qualified → enriched → in_pipeline; or skipped / educator (parked until the partner offer). */
+    status: text("status").notNull().default("new"),
+    /** agency | educator | skip */
+    kind: text("kind"),
+    fitScore: integer("fit_score"),
+    usesGhl: boolean("uses_ghl"),
+    qualifyNotes: text("qualify_notes"),
+    /** Public links: website, instagram, skool, linktree, x, linkedin, facebook, tiktok. */
+    links: jsonb("links").$type<Record<string, string>>().notNull().default({}),
+    emails: jsonb("emails").$type<{ email: string; source: string }[]>().notNull().default([]),
+    phones: jsonb("phones").$type<{ phone: string; source: string }[]>().notNull().default([]),
+    agencyId: uuid("agency_id").references(() => agencies.id, { onDelete: "set null" }),
+    ghlContactId: text("ghl_contact_id"),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex("creators_channel_idx").on(t.channelId), index("creators_status_idx").on(t.status)],
+);
+
+/**
+ * A message a person sends by hand (Instagram, Skool, phone): written by the
+ * bot, queued with a due time, done from the DM queue or GHL. Never sent
+ * automatically — those platforms ban automated messages.
+ */
+export const outreachTasks = pgTable(
+  "outreach_tasks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    creatorId: uuid("creator_id").notNull().references(() => creators.id, { onDelete: "cascade" }),
+    /** instagram | skool | phone | youtube */
+    channel: text("channel").notNull(),
+    /** Where to do it: the profile or chat link, or the phone number. */
+    target: text("target").notNull(),
+    message: text("message").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    doneAt: timestamp("done_at", { withTimezone: true }),
+    skippedAt: timestamp("skipped_at", { withTimezone: true }),
+    /** They answered on this channel: everything else to them stops. */
+    repliedAt: timestamp("replied_at", { withTimezone: true }),
+    ghlTaskId: text("ghl_task_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("outreach_tasks_due_idx").on(t.dueAt), index("outreach_tasks_creator_idx").on(t.creatorId)],
+);
+
 /** Switches the owner controls, e.g. "paused". One row per key. */
 export const controls = pgTable("controls", {
   key: text("key").primaryKey(),
