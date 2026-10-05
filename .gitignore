@@ -28,3 +28,6 @@ npm-debug.log*
 
 # drafts exported for review (names, email bodies)
 drafts/
+
+# Claude Code personal settings
+.claude/settings.local.json
