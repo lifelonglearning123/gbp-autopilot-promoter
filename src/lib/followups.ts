@@ -90,7 +90,14 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
   let notes: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix: string = attempt > 0 ? `\n\nYour previous drafts:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
-    const written = await askJson<FollowUps>({ model: contact.writerModel ?? env.WRITER_MODELS.split(",")[0].trim(), system: WRITER, user: brief + fix, maxTokens: 1200 });
+    // If the writer cannot be reached, the template follow-ups stand in rather than leaving the lead without any.
+    const written = await askJson<FollowUps>({ model: contact.writerModel ?? env.WRITER_MODELS.split(",")[0].trim(), system: WRITER, user: brief + fix, maxTokens: 1200 }).catch(
+      (e: unknown) => {
+        notes = [`writer unavailable: ${e instanceof Error ? e.message : e}`];
+        return null;
+      },
+    );
+    if (!written) break;
     draft = {
       body_2: String(written.data.body_2 ?? "").trim(),
       body_3: String(written.data.body_3 ?? "").trim(),
