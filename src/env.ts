@@ -73,7 +73,7 @@ const schema = z.object({
   DATAFORSEO_PASSWORD: optional,
   /** The Instantly campaign for creators (its own copy and results). */
   INSTANTLY_YT_CAMPAIGN_ID: optional,
-  /** The Instantly campaign for creator partners (the 40% local.macaws.ai offer). */
+  /** The Instantly campaign for creators (free white-label GBP Autopilot, 40% for life). */
   INSTANTLY_PARTNER_CAMPAIGN_ID: optional,
 });
 

@@ -1,37 +1,59 @@
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { agencies, contacts, creators, messages } from "@/db/schema";
+import { agencies, contacts, creators, messages, samples } from "@/db/schema";
 import { env } from "@/env";
 import { agencyKey, emailType, tidyEmail } from "./contact-rules";
+import { themeColour } from "./crawl-rules";
 import { hostOf } from "./creator-rules";
 import { writerFor } from "./draft";
-import { partnerProblems, type PartnerEmails } from "./draft-rules";
+import { partnerProblems, sameBusiness, type PartnerEmails } from "./draft-rules";
 import { askJson } from "./openrouter";
-import { PARTNER_FACTS, PARTNER_URL } from "./offer";
+import { PARTNER_FACTS } from "./offer";
+import { claimLink, makeSample, PlatformError, shortClaimUrl, type Sample } from "./platform";
+import { channels } from "./youtube";
 
 /**
- * Creator partners: educators (teach agencies) and channels whose audience is
- * local business owners, offered 40% for life for promoting local.macaws.ai.
- *   hand over  a partner with a public email becomes a contact (source
+ * The creator offer, for every YouTube creator we qualify (agency, educator,
+ * or a channel for local business owners): their own white-label GBP
+ * Autopilot in their brand, at no cost, and 40% for life of what the
+ * businesses on it pay.
+ *   hand over  a creator with a public email becomes a contact (source
  *              "partner:<channel>") on an agency row in status "partner", so
- *              research and the agency drafts never touch it
- *   draft      the first email and three follow-ups at once, checked (rules,
- *              then the analysis model), one rewrite, held HOLD_HOURS; the
- *              agency row goes to "queued" so the push picks it up for the
- *              partners' campaign. Interested replies reach the owner, who
- *              sets up the creator's referral link by hand.
+ *              research and the agency drafts never touch it. YouTube agencies
+ *              handed to the reseller pipeline earlier, whose email was not yet
+ *              pushed, move over too.
+ *   draft      a sample audit of their own listing in their brand (avatar as
+ *              logo) when Google has one, else a claim link alone — both made
+ *              as offer "creator" so the claimed account is a creator's. Then
+ *              the first email and three follow-ups, checked (rules, then the
+ *              analysis model), one rewrite, held HOLD_HOURS; the agency row goes
+ *              to "queued" so the push picks it up for the partners' campaign.
  */
 
 type Log = (line: string) => void;
 
-export const PARTNER_STATUSES = ["educator", "audience"] as const;
-
 export async function handOverPartners(limit: number, log: Log) {
+  const tally: Record<string, number> = {};
+
+  // Earlier YouTube agencies whose reseller email has not gone: the creator offer instead.
+  const moved = (await db().execute(sql`
+    select cr.id creator_id, cr.channel_id, c.id contact_id, c.agency_id
+    from creators cr join contacts c on c.agency_id = cr.agency_id and c.source like 'youtube:%'
+    where cr.status = 'in_pipeline'
+      and not exists (select 1 from messages m where m.contact_id = c.id and m.pushed_at is not null)
+    limit ${limit}`)) as unknown as { creator_id: string; channel_id: string; contact_id: string; agency_id: string }[];
+  for (const m of moved) {
+    await db().update(messages).set({ stoppedAt: new Date() }).where(and(eq(messages.contactId, m.contact_id), isNull(messages.pushedAt)));
+    await db().update(contacts).set({ source: `partner:${m.channel_id}`, updatedAt: new Date() }).where(eq(contacts.id, m.contact_id));
+    await db().update(agencies).set({ status: "partner", updatedAt: new Date() }).where(eq(agencies.id, m.agency_id));
+    await db().update(creators).set({ status: "partner_pipeline", updatedAt: new Date() }).where(eq(creators.id, m.creator_id));
+    tally.moved_from_reseller = (tally.moved_from_reseller ?? 0) + 1;
+  }
+
   const todo = (await db().execute(sql`
     select id from creators
-    where status in ('educator', 'audience') and agency_id is null and links <> '{}'::jsonb
+    where status in ('qualified', 'enriched', 'educator', 'audience') and agency_id is null and links <> '{}'::jsonb
     order by updated_at limit ${limit}`)) as unknown as { id: string }[];
-  const tally: Record<string, number> = {};
   for (const { id } of todo) {
     const [c] = await db().select().from(creators).where(eq(creators.id, id)).limit(1);
     const site = c.links.website ?? null;
@@ -42,10 +64,9 @@ export async function handOverPartners(limit: number, log: Log) {
     let status = "partner_no_email";
     let agencyId: string | null = null;
     if (email) {
-      const key = agencyKey(site, email);
       const made = await db()
         .insert(agencies)
-        .values({ name: c.title, domain: key, website: site, country: c.country, status: "partner", fitScore: c.fitScore })
+        .values({ name: c.title, domain: agencyKey(site, email), website: site, country: c.country, status: "partner", fitScore: c.fitScore })
         .onConflictDoNothing({ target: agencies.domain })
         .returning({ id: agencies.id });
       if (made.length) {
@@ -71,40 +92,51 @@ export async function handOverPartners(limit: number, log: Log) {
     await db().update(creators).set({ status, agencyId, updatedAt: new Date() }).where(eq(creators.id, id));
     tally[status] = (tally[status] ?? 0) + 1;
   }
-  if (todo.length) log(`partners handed over: ${JSON.stringify(tally)}`);
+  if (moved.length || todo.length) log(`creators handed over: ${JSON.stringify(tally)}`);
 }
 
-const WRITER = `You write a cold email sequence from Chao, founder of macaws.ai, to a YouTube creator, inviting them to become a referral partner.
+const WRITER = `You write a cold email sequence from Chao, founder of GBP Autopilot, to a YouTube creator, offering them their own white-label GBP Autopilot.
 ${PARTNER_FACTS}
 
 Return ONLY a JSON object: {"subject": string, "body": string, "body_2": string, "body_3": string, "body_4": string}.
-- subject: under 50 characters, lower-key, no exclamation marks, no capitals for emphasis; hint at the partnership.
-- body (first email, day 0): 70-120 words, plain text, UK English, short paragraphs. Greet by first name if given, else "Hi there". Open with one of their recent videos, by its topic, naturally (not "I watched your video", no flattery), and why their audience fits. Then say plainly what local.macaws.ai does for a local business, in one sentence. Then the offer: 40% of what every business they refer pays, for life. Write ${PARTNER_URL} out exactly once on its own line so they can see it. Close with one soft question: would they like a referral link (they just reply).
-- body_2 (day 3, a reply in the same thread): 35-70 words. One different angle: e.g. their viewers can run the free check on local.macaws.ai without signing up, which makes it an easy thing to show on screen. Short question.
-- body_3 (day 7): 50-100 words. The numbers, plainly: £49 a month per business, so about £19.60 a month to them for every business that stays; no cost or minimum to join; reply and Chao sends their link. Soft question.
+- subject: under 50 characters, lower-key, no exclamation marks, no capitals for emphasis; hint at their own branded version.
+- body (first email, day 0): 80-130 words, plain text, UK English, short paragraphs. Greet by first name if given, else "Hi there". Open with one of their recent videos, by its topic, naturally (not "I watched your video", no flattery), and why their audience fits. Then the offer, plainly: their own white-label Google Business Profile service under their brand, at no cost to them; businesses from their audience sign up on it at £49 a month and they earn 40% of what each pays, for life; we do all the work. If an audit is given, one concrete finding from it as proof, with the audit link once. The CLAIM LINK written out exactly once on its own line, to set up their branded version. One soft question.
+- body_2 (day 3, a reply in the same thread): 35-70 words. One different angle (e.g. how they would show it to their audience, or another finding from the audit). Short question. No link needed.
+- body_3 (day 7): 50-100 words. The numbers, plainly: £49 a month per business, so about £19.60 a month to them for every business that stays, for life; nothing to pay; the CLAIM LINK once on its own line. Soft question.
 - body_4 (day 14): 25-55 words. A short, friendly last note: you'll stop writing; the offer stands if they reply later.
-- No sign-off or name (added later). The only link allowed anywhere is ${PARTNER_URL}. No placeholders, no hype (game-changer, skyrocket, passive income machine), no flattery, no invented numbers, results or terms.`;
+- No sign-off or name (added later). The only links allowed are the claim link and the audit link given. No placeholders, no hype (game-changer, skyrocket, passive income machine), no flattery, no invented numbers, results or terms.`;
 
-const CHECKER = `You check a cold email sequence to a YouTube creator before it is sent, against the facts and the channel details given.
+const CHECKER = `You check a cold email sequence to a YouTube creator before it is sent, against the facts, the channel details and the audit given.
 True facts, which the emails may state:
 ${PARTNER_FACTS}
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
-ok is false if the first email does not make the offer plain (40% of what referred businesses pay, for life, for promoting local.macaws.ai); any email states terms or facts not given (payout schedule, bonuses, a sign-up page, results), misdescribes their channel, is pushy, guilt-tripping, flattering or hype-y, reads as a template, or would embarrass the sender. notes: short, specific fixes (empty when ok).`;
+ok is false if the first email does not make the offer plain (their own white-label GBP Autopilot in their brand, at no cost, 40% of what the businesses pay, for life); any email states terms or facts not given (payout schedule, bonuses, results), misreads the audit, misdescribes their channel, is pushy, guilt-tripping, flattering or hype-y, reads as a template, or would embarrass the sender. notes: short, specific fixes (empty when ok).`;
 
 export async function draftPartners(limit: number, log: Log) {
   const todo = (await db().execute(sql`
     select c.id from contacts c join agencies a on a.id = c.agency_id
     where c.source like 'partner:%' and c.email_status = 'valid' and a.status = 'partner'
-      and not exists (select 1 from messages m where m.contact_id = c.id)
+      and not exists (select 1 from messages m where m.contact_id = c.id and m.stopped_at is null)
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     limit ${limit}`)) as unknown as { id: string }[];
   const tally: Record<string, number> = {};
   for (const { id } of todo) {
-    const r = await draftPartner(id).catch((e: unknown) => ({ passed: false, why: e instanceof Error ? e.message : String(e) }));
-    const k = "why" in r ? "failed" : r.passed ? "queued" : "needs_review";
+    const r = await draftPartner(id).catch((e: unknown) => ({ why: e instanceof Error ? e.message : String(e) }));
+    const k = "why" in r ? `failed (${r.why.slice(0, 80)})` : r.passed ? "queued" : "needs_review";
     tally[k] = (tally[k] ?? 0) + 1;
   }
-  if (todo.length) log(`partner emails: ${JSON.stringify(tally)}`);
+  if (todo.length) log(`creator emails: ${JSON.stringify(tally)}`);
+}
+
+/** Their brand: the channel's avatar as logo, their site's theme colour if they have a site. */
+async function brandOf(c: typeof creators.$inferSelect) {
+  const [ch] = env.YOUTUBE_API_KEY ? await channels([c.channelId]).catch(() => []) : [];
+  let colour: string | null = null;
+  if (c.links.website) {
+    const res = await fetch(c.links.website, { redirect: "follow", signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    if (res?.ok) colour = themeColour((await res.text()).slice(0, 500_000));
+  }
+  return { name: c.title, logoUrl: ch?.avatar ?? null, colour };
 }
 
 async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
@@ -116,16 +148,62 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
     .limit(1);
   if (!row) throw new Error("no creator for this contact");
   const { contact, creator: c } = row;
+  const brand = await brandOf(c);
+  if (brand.logoUrl || brand.colour) {
+    await db().update(agencies).set({ branding: { logoUrl: brand.logoUrl, colour: brand.colour } }).where(eq(agencies.id, contact.agencyId));
+  }
+
+  // A sample of their own listing if Google has one; a claim link alone otherwise.
+  let sample: Sample | null = null;
+  try {
+    const s = await makeSample({ name: c.title, town: c.country ?? "", brand, externalRef: contact.id, contact: { email: contact.email }, offer: "creator" });
+    if (sameBusiness(c.title, s.result.title)) sample = s;
+  } catch (e) {
+    const status = e instanceof PlatformError ? e.status : 0;
+    if (!(status >= 400 && status < 500 && ![401, 403, 429].includes(status))) throw e;
+  }
+  let claimUrl: string;
+  let previewUrl: string | null = null;
+  if (sample?.claimUrl) {
+    await db()
+      .insert(samples)
+      .values({
+        agencyId: contact.agencyId,
+        contactId: contact.id,
+        kind: "own",
+        platformToken: sample.token,
+        previewUrl: sample.previewUrl,
+        claimUrl: sample.claimUrl,
+        score: sample.result.score,
+        result: sample.result as unknown as Record<string, unknown>,
+      })
+      .onConflictDoNothing();
+    claimUrl = shortClaimUrl({ claimUrl: sample.claimUrl, platformToken: sample.token })!;
+    previewUrl = sample.previewUrl;
+  } else {
+    sample = null;
+    ({ claimUrl } = await claimLink({ agencyName: c.title, email: contact.email, logoUrl: brand.logoUrl, colour: brand.colour, externalRef: contact.id, offer: "creator" }));
+  }
+
   const writer = contact.writerModel ?? writerFor(contact.id);
   if (writer !== contact.writerModel) await db().update(contacts).set({ writerModel: writer, updatedAt: new Date() }).where(eq(contacts.id, contact.id));
-
+  const r = sample?.result;
   const brief = [
     `First name: ${contact.firstName?.trim() || "(unknown)"}`,
     `Channel: "${c.title}" (${c.subscribers ?? "?"} subscribers, country ${c.country ?? "?"})`,
-    `Who watches them: ${c.kind === "educator" ? "marketers and agencies (they teach marketing)" : "local business owners"}`,
+    `Who watches them: ${c.kind === "audience" ? "local business owners" : c.kind === "educator" ? "marketers and agencies (they teach marketing)" : "local businesses and marketers (they run an agency or sell local SEO)"}`,
     `About them: ${c.qualifyNotes ?? ""}`,
     `Recent videos:`,
     ...c.recentVideos.slice(0, 5).map((v) => `- "${v.title}" (${v.publishedAt.slice(0, 10)})`),
+    ``,
+    r
+      ? [
+          `The audit (of their own Google listing "${r.title}", ${r.address}, already in their brand): score ${r.score}/100. Verdict: ${r.verdict}`,
+          ...(r.gaps ?? []).slice(0, 4).map((g) => `- ${g.label}: ${g.note}`),
+          `Audit link: ${previewUrl}`,
+        ].join("\n")
+      : `No audit (they have no Google listing of their own): do not mention an audit.`,
+    `Claim link (sets up their branded version): ${claimUrl}`,
   ].join("\n");
 
   let draft: PartnerEmails = { subject: "", body: "", body_2: "", body_3: "", body_4: "" };
@@ -140,7 +218,7 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
       body_3: String(data.body_3 ?? "").trim(),
       body_4: String(data.body_4 ?? "").trim(),
     };
-    notes = partnerProblems(draft, PARTNER_URL);
+    notes = partnerProblems(draft, { claimUrl, previewUrl });
     if (notes.length === 0) {
       const { data: check } = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
@@ -179,6 +257,6 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
   await db()
     .update(agencies)
     .set({ status: passed ? "queued" : "needs_review", updatedAt: new Date() })
-    .where(eq(agencies.id, contact.agencyId));
+    .where(and(eq(agencies.id, contact.agencyId), inArray(agencies.status, ["partner", "needs_review"])));
   return { passed };
 }

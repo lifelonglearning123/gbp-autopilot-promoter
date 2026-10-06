@@ -8,11 +8,10 @@ export const OFFER_FACTS = `GBP Autopilot is a white-label platform agencies res
 Every agency we write to uses GoHighLevel (GHL), and GBP Autopilot is built to work with the agency's own GHL: each audit lands in the agency's GHL sub-account as a contact with the findings as a note and the work to do as a task, and the weekly Google posts draw on what is actually happening in the client's GHL (with customers' personal details removed). Do not claim it is made by HighLevel, is a HighLevel marketplace app, or is an official partner.`;
 
 /**
- * The creator partner offer (the owner's terms, 2026-10-06): any content
- * creator who promotes local.macaws.ai earns 40% of what each business they
- * refer pays, for as long as it stays a customer. There is no sign-up page
- * yet: a creator replies and the owner sets up their link by hand.
+ * The creator offer (the owner's terms, 2026-10-06): a content creator gets
+ * their own white-label GBP Autopilot in their brand at no cost; local
+ * businesses from their audience sign up on it at £49 a month, and the creator
+ * earns 40% of what each pays, for life. They claim it from the link in the
+ * email (the platform makes it a creator account: offer "creator").
  */
-export const PARTNER_URL = "https://local.macaws.ai";
-export const PARTNER_FACTS = `macaws.ai (Chao's company) has two products: GBP Autopilot, the white-label version agencies resell, and local.macaws.ai, the same Google Business Profile service sold directly to a single local business for £49 a month (no setup fee, no contract): it fills in the profile, replies to every review in the owner's voice, posts weekly, tracks map rankings and sends a monthly report. Anyone can run a free check on local.macaws.ai without signing up.
-Partner offer for content creators: a creator who recommends local.macaws.ai to their audience earns 40% of what every business they refer pays, for life (as long as that business stays a customer) — about £19.60 a month per business on the £49 plan. To join, they reply and Chao sets up their personal referral link. There is no sign-up page, no minimum and no cost to join. Do not claim other terms (payout dates, cookie length, bonuses, tiers).`;
+export const PARTNER_FACTS = `The creator offer: a content creator gets their own white-label GBP Autopilot, under their own brand (their name and logo), at no cost to them: no fee, no minimum, nothing to pay. Local businesses from their audience sign up on the creator's branded version for £49 a month; it fills in the business's Google Business Profile, replies to every review in the owner's voice, posts weekly, tracks map rankings and sends a monthly report. The creator earns 40% of what every business pays, for life (as long as that business stays a customer): about £19.60 a month per business. We do all the work; the creator just points their audience to it. They set it up by claiming their account from the claim link. Do not claim other terms (payout dates, cookie length, bonuses, tiers, caps).`;

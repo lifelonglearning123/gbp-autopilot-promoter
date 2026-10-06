@@ -254,8 +254,9 @@ export const creators = pgTable(
     /** What found it, e.g. the search phrase. */
     foundBy: text("found_by"),
     /**
-     * new → qualified → enriched → in_pipeline (agencies); new → educator | audience →
-     * partner_pipeline | partner_no_email | partner_known (the 40% partner offer); or skipped.
+     * new → qualified → enriched (agencies) | educator | audience → partner_pipeline |
+     * partner_no_email | partner_known (the creator offer); or skipped. in_pipeline / no_email:
+     * agencies handed to the reseller emails before the creator offer.
      */
     status: text("status").notNull().default("new"),
     /** agency | educator | audience | skip */

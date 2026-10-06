@@ -12,7 +12,7 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
-import { closeAnsweredTasks, discoverCreators, enrichCreators, handOverCreators, qualifyCreators, queueTasks } from "./creators";
+import { closeAnsweredTasks, discoverCreators, enrichCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
 import { draftPartners, handOverPartners } from "./partners";
 import { draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
@@ -118,7 +118,7 @@ export async function backfillFollowUps(limit: number, deadline: number, log: Lo
 type Track = "main" | "youtube" | "partner";
 const TRACK_NAME: Record<Track, string> = { main: "main", youtube: "YouTube creators'", partner: "creator partners'" };
 
-/** Push due emails: the GHL list to the main campaign, YouTube agencies and creator partners to theirs. */
+/** Push due emails: the GHL list to the main campaign, creators (the creator offer) to theirs; the YouTube campaign keeps its earlier leads. */
 export async function pushDue(limit: number, log: Log): Promise<number> {
   const main = await pushInto(env.INSTANTLY_CAMPAIGN_ID, "main", limit, log);
   const yt = await pushInto(env.INSTANTLY_YT_CAMPAIGN_ID, "youtube", limit, log);
@@ -191,7 +191,7 @@ async function pushInto(campaignId: string | undefined, track: Track, limit: num
 
 /* ── Replies ────────────────────────────────────────────────────────────── */
 
-const SORTER = `You sort replies to a cold email that offered either a marketing agency a white-label Google Business Profile service, or a YouTube creator a referral partnership (40% commission).
+const SORTER = `You sort replies to a cold email that offered either a marketing agency a white-label Google Business Profile service, or a YouTube creator a referral partnership (their own white-label version, free, 40% commission).
 Return ONLY a JSON object: {"kind": string, "confidence": number 0-1, "summary": string (one short sentence)}.
 kind is one of: "interested" (wants to know more, asks a question, wants a call or pricing), "not_now" (polite no for now, maybe later),
 "remove" (asks to be removed, unsubscribed, not interested at all, hostile), "wrong_person" (not them, sends elsewhere),
@@ -246,7 +246,7 @@ export async function handleReplies(log: Log) {
         `<p><b>${esc(r.first_name ?? "")} at ${esc(r.agency)}</b> (${esc(r.domain)}) replied — sorted as <b>${esc(kind)}</b>.</p>
          <p>${esc(summary)}</p>
          <blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#333">${esc(r.body.slice(0, 2000)).replace(/\n/g, "<br>")}</blockquote>
-         ${partner && urgent ? `<p><b>A creator wants to promote local.macaws.ai (40% for life).</b> Set up their referral link and send it to them.</p>` : ""}
+         ${partner && urgent ? `<p><b>A creator is interested in their own white-label GBP Autopilot (free, 40% for life).</b> Their claim link is in the email they replied to.</p>` : ""}
          <p>Answer it from Instantly's inbox (Unibox). The campaign has already stopped writing to them.</p>`,
       ).catch(() => {});
       await db().update(replies).set({ alertedAt: new Date() }).where(eq(replies.id, r.id));
@@ -311,14 +311,13 @@ export async function hourlyRun(budgetMs: number) {
       await step("youtube details", () => enrichCreators(15, log));
       await step("youtube find", () => discoverCreators(log));
       await step("youtube qualify", () => qualifyCreators(20, log));
-      await step("youtube hand over", () => handOverCreators(30, log));
-      await step("partners hand over", () => handOverPartners(30, log));
+      await step("youtube hand over", () => handOverPartners(30, log));
       await step("youtube DMs", () => queueTasks(10, log));
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
       await step("verify", () => verifySome(50, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
       await step("draft", () => draftSome(20, deadline, log));
-      await step("partner emails", () => draftPartners(5, log));
+      await step("creator emails", () => draftPartners(5, log));
     }
   }
   await db().insert(events).values({ source: "bot", type: "run", payload: { lines } });

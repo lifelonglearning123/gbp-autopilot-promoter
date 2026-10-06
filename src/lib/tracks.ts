@@ -98,6 +98,7 @@ export async function draftWarmNotes(log: Log) {
     where e.source = 'platform' and e.type = 'sample.viewed'
       and a.status in ('queued', 'contacted')
       and exists (select 1 from messages m where m.contact_id = c.id and m.step = 1 and m.pushed_at is not null)
+      and c.source not like 'partner:%'
       and not exists (select 1 from messages m where m.contact_id = c.id and m.step = ${STEP_WARM})
       and not exists (select 1 from replies r where r.contact_id = c.id)
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)

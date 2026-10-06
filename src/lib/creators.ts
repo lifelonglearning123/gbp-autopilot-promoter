@@ -1,10 +1,9 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { agencies, contacts, controls, creators, messages, outreachTasks, replies } from "@/db/schema";
+import { controls, creators, messages, outreachTasks, replies } from "@/db/schema";
 import { env } from "@/env";
-import { agencyKey, emailType, tidyEmail } from "./contact-rules";
 import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks } from "./creator-rules";
-import { OFFER_FACTS, PARTNER_FACTS } from "./offer";
+import { PARTNER_FACTS } from "./offer";
 import { findWebsite } from "./dataforseo";
 import { askJson } from "./openrouter";
 import { channels, recentUploads, searchVideos, videoDescriptions } from "./youtube";
@@ -15,8 +14,7 @@ import { channels, recentUploads, searchVideos, videoDescriptions } from "./yout
  *   qualify    the analysis model: agency/freelancer (a buyer), educator or
  *              business-owner audience (partners for the 40% offer), or skip
  *   enrich     public contact details from the description, website and link page
- *   hand over  a creator with an email becomes an agency + contact, so the
- *              normal pipeline researches, audits, writes and emails them
+ *   hand over  a creator with an email gets the creator offer (partners.ts)
  *   tasks      Instagram / Skool / phone messages for a person to send
  * Every detail keeps where it was published (CASL asks for proof of source).
  */
@@ -192,51 +190,6 @@ export async function enrichCreators(limit: number, log: Log) {
   if (n) log(`youtube: contact details collected for ${n} creators`);
 }
 
-/* ── Hand over to the email pipeline ────────────────────────────────────── */
-
-/**
- * An enriched agency creator with an email becomes an agency (by its site's
- * domain) and a contact, so research, the audit, the four emails and every
- * check run as for the GHL list. Its emails go to the creators' campaign.
- */
-export async function handOverCreators(limit: number, log: Log) {
-  const todo = await db().select().from(creators).where(and(eq(creators.status, "enriched"), isNull(creators.agencyId))).limit(limit);
-  let n = 0;
-  for (const c of todo) {
-    // A work address on their own domain first.
-    const site = c.links.website ?? null;
-    const siteHost = site ? hostOf(site) : null;
-    const pick =
-      c.emails.find((e) => siteHost && e.email.endsWith(`@${siteHost}`)) ?? c.emails.find((e) => emailType(e.email) === "work") ?? c.emails[0];
-    const email = tidyEmail(pick?.email);
-    if (!email) {
-      await db().update(creators).set({ status: "no_email", updatedAt: new Date() }).where(eq(creators.id, c.id));
-      continue;
-    }
-    const key = agencyKey(site, email);
-    await db()
-      .insert(agencies)
-      .values({ name: c.title, domain: key, website: site, country: c.country })
-      .onConflictDoNothing({ target: agencies.domain });
-    const [agency] = await db().select({ id: agencies.id }).from(agencies).where(eq(agencies.domain, key)).limit(1);
-    await db()
-      .insert(contacts)
-      .values({
-        agencyId: agency.id,
-        email,
-        emailType: emailType(email),
-        phone: c.phones[0]?.phone ?? null,
-        country: c.country,
-        source: `youtube:${c.channelId}`,
-        sourceProof: { url: pick.source, seenAt: new Date().toISOString() },
-      })
-      .onConflictDoNothing();
-    await db().update(creators).set({ agencyId: agency.id, status: "in_pipeline", updatedAt: new Date() }).where(eq(creators.id, c.id));
-    n++;
-  }
-  if (n) log(`youtube: ${n} creators handed to the email pipeline`);
-}
-
 /** What the writer may say about a creator's channel, for an agency we write to. */
 export async function creatorContext(agencyId: string): Promise<string | null> {
   const [c] = await db().select().from(creators).where(eq(creators.agencyId, agencyId)).limit(1);
@@ -250,22 +203,13 @@ export async function creatorContext(agencyId: string): Promise<string | null> {
 
 /* ── Messages for a person to send ──────────────────────────────────────── */
 
-const DMS = `You write short direct messages from Chao, founder of GBP Autopilot, to a YouTube creator who runs a marketing agency or sells local SEO.
-${OFFER_FACTS}
-
-Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script": string}.
-- instagram: 25-50 words, casual, mention one of their recent videos by its topic, say we built a white-label Google Business Profile service that works inside GoHighLevel, offer to send them a free audit in their brand. One question. No links.
-- skool: 40-70 words, a little fuller than Instagram, same content, friendly and community-appropriate. No links.
-- phone_script: 60-100 words for a short call: who you are, why them (their channel and videos), the offer in one line, ask for 10 minutes or permission to email the audit. Plain spoken English.
-UK English. No hype, no flattery, no placeholders. Never claim to be from HighLevel.`;
-
-const PARTNER_DMS = `You write short direct messages from Chao, founder of macaws.ai, to a YouTube creator, inviting them to become a referral partner.
+const PARTNER_DMS = `You write short direct messages from Chao, founder of GBP Autopilot, to a YouTube creator, offering them their own white-label GBP Autopilot.
 ${PARTNER_FACTS}
 
 Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script": string}.
-- instagram: 25-50 words, casual, mention one of their recent videos by its topic, say their audience fits local.macaws.ai and that partners earn 40% of what every referred business pays, for life. Ask if they'd like a referral link. No links.
+- instagram: 25-50 words, casual, mention one of their recent videos by its topic, say they can have their own white-label Google Business Profile service in their brand at no cost, and earn 40% of what every business on it pays, for life. Ask if they'd like it set up. No links.
 - skool: 40-70 words, a little fuller than Instagram, same content, friendly and community-appropriate. No links.
-- phone_script: 60-100 words for a short call: who you are, why them (their channel), the 40% lifetime offer in one line, ask whether you can send their referral link.
+- phone_script: 60-100 words for a short call: who you are, why them (their channel), the offer in one line (their own branded version, free, 40% for life), ask whether you can email their claim link.
 UK English. No hype, no flattery, no placeholders, no terms beyond the facts given.`;
 
 /**
@@ -286,7 +230,7 @@ export async function queueTasks(limit: number, log: Log) {
     const recent = c.recentVideos.slice(0, 4).map((v) => `- ${v.title}`).join("\n");
     const { data } = await askJson<{ instagram: string; skool: string; phone_script: string }>({
       model: env.WRITER_MODELS.split(",")[0].trim(),
-      system: c.kind === "agency" ? DMS : PARTNER_DMS,
+      system: PARTNER_DMS,
       user: `Channel: ${c.title}
 About them: ${c.qualifyNotes ?? ""}
 Uses GoHighLevel: ${c.usesGhl ? "yes" : "unknown"}

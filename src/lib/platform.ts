@@ -34,6 +34,8 @@ export type SampleRequest = (
   brand: { name: string; logoUrl?: string | null; colour?: string | null };
   externalRef?: string;
   contact?: { email: string; fullName?: string };
+  /** "creator": the claimed account is a content creator's — free, 40% of what its businesses pay, for life. */
+  offer?: "creator";
 };
 
 export class PlatformError extends Error {
@@ -77,6 +79,7 @@ export function claimLink(req: {
   logoUrl?: string | null;
   colour?: string | null;
   externalRef?: string;
+  offer?: "creator";
 }): Promise<{ claimUrl: string }> {
   return call("/api/bot/claim-link", req);
 }

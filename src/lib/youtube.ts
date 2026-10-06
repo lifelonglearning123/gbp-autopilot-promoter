@@ -50,6 +50,8 @@ export type Channel = {
   subscribers: number | null;
   videoCount: number | null;
   uploads: string | null;
+  /** The channel's profile picture: the logo for a creator's white-label brand. */
+  avatar: string | null;
 };
 
 /** Up to 50 channels at once (1 unit). */
@@ -58,7 +60,7 @@ export async function channels(ids: string[]): Promise<Channel[]> {
   const r = await get<{
     items?: {
       id: string;
-      snippet: { title: string; description?: string; customUrl?: string; country?: string };
+      snippet: { title: string; description?: string; customUrl?: string; country?: string; thumbnails?: Record<string, { url: string }> };
       statistics?: { subscriberCount?: string; videoCount?: string; hiddenSubscriberCount?: boolean };
       contentDetails?: { relatedPlaylists?: { uploads?: string } };
     }[];
@@ -72,6 +74,7 @@ export async function channels(ids: string[]): Promise<Channel[]> {
     subscribers: c.statistics?.hiddenSubscriberCount ? null : Number(c.statistics?.subscriberCount ?? NaN) || null,
     videoCount: Number(c.statistics?.videoCount ?? NaN) || null,
     uploads: c.contentDetails?.relatedPlaylists?.uploads ?? null,
+    avatar: c.snippet.thumbnails?.high?.url ?? c.snippet.thumbnails?.medium?.url ?? c.snippet.thumbnails?.default?.url ?? null,
   }));
 }
 

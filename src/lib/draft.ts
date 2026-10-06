@@ -5,7 +5,7 @@ import { env } from "@/env";
 import { draftProblems, sameBusiness, sampleTargets, type SampleTarget } from "./draft-rules";
 import { creatorContext } from "./creators";
 import { askJson } from "./openrouter";
-import { OFFER_FACTS, PARTNER_FACTS } from "./offer";
+import { OFFER_FACTS } from "./offer";
 import { makeSample, PlatformError, type Sample, type SampleResult } from "./platform";
 import type { Facts } from "./research";
 
@@ -32,15 +32,12 @@ Return ONLY a JSON object: {"subject": string, "body": string}.
 - Then say plainly, in one or two sentences, what we offer: white-label Google Business Profile auditing and optimisation for their local business clients, under their brand, that they can resell. Use the words "white-label" and "Google Business Profile" (or "Google listing"). Say in a few words that it works with the GoHighLevel they already use (e.g. findings land in their GHL sub-accounts as tasks).
 - Then the sample audit as proof: whose listing it is, one or two concrete findings from it, and the link, written out exactly once on its own line. Say it is already in their brand.
 - One soft question at the end, about whether they would offer this to their clients.
-- Only if they run a YouTube channel (given below): add one last line starting "P.S." saying creators who recommend local.macaws.ai (our £49/month version for single local businesses) to their audience earn 40% of what each referred business pays, for life; they can reply for a referral link. No link in the P.S. Keep the whole email, P.S. included, under 125 words.
 - No sign-off or name (the signature is added later), no other links, no prices unless it fits naturally, no placeholders, no flattery, no hype words (revolutionary, game-changer, skyrocket).
 - Use only facts given below. Never invent clients, numbers, or results.`;
 
 const CHECKER = `You check a cold email before it is sent. Compare it with the research and the audit it was written from.
 True facts about our offer, which the email may state:
 ${OFFER_FACTS}
-${PARTNER_FACTS}
-A P.S. about the 40% partner offer is expected when the agency runs a YouTube channel.
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
 ok is false if the email: does not make clear that we offer white-label Google Business Profile auditing and optimisation the agency can resell to its local clients under its own brand; states anything not supported by the research or the audit (names, numbers, findings, services); misreads the audit; is pushy, flattering or hype-y; reads as a template; or would embarrass the sender if the agency checked it. notes: short, specific fixes (empty when ok).`;
 

@@ -4,7 +4,8 @@ import { events } from "@/db/schema";
 import { env } from "@/env";
 import { enableSequence, shortenClaimLinks, syncFollowUps } from "@/lib/followups";
 import { backfillFollowUps } from "@/lib/pipeline";
-import { discoverCreators, enrichCreators, handOverCreators, qualifyCreators, queueTasks } from "@/lib/creators";
+import { discoverCreators, enrichCreators, qualifyCreators, queueTasks } from "@/lib/creators";
+import { handOverPartners } from "@/lib/partners";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
     // Work already sorted goes first, so a round always moves creators forward.
     after(async () => {
       await enrichCreators(30, log);
-      await handOverCreators(30, log);
+      await handOverPartners(30, log);
       await queueTasks(15, log);
       await discoverCreators(log);
       await qualifyCreators(24, log);

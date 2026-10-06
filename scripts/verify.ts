@@ -180,27 +180,32 @@ check("the sequence runs day 0, 3, 7, 14, follow-ups in the same thread", () => 
 });
 
 console.log("\nYouTube creators");
-check("a partner sequence states 40% for life, links only local.macaws.ai, and is short", () => {
-  const url = "https://local.macaws.ai";
+check("a creator sequence states the offer plainly and links only the claim link and the audit", () => {
+  const links = { claimUrl: "https://gbp.macaws.ai/c/abc", previewUrl: "https://gbp.macaws.ai/s/abc" };
   const good = {
-    subject: "a referral idea for your channel",
+    subject: "your own branded version",
     body: [
       "Hi Sam,",
-      "Your video on getting more reviews fits this well. local.macaws.ai looks after a local business's Google profile for £49 a month.",
-      "Partners earn 40% of what each business they refer pays, for life:",
-      url,
-      "Would you like a referral link?",
+      "Your video on getting more reviews fits this well. You can have your own white-label Google Business Profile service, in your brand, at no cost.",
+      "Businesses pay £49 a month and you earn 40% of what each pays, for life. Your listing scored 62:",
+      links.previewUrl,
+      "Set yours up here:",
+      links.claimUrl,
+      "Worth a look?",
     ].join("\n\n"),
-    body_2: "Hi Sam, your viewers can run the free check without signing up. Easy to show on screen?",
-    body_3: "Hi Sam, about £19.60 a month for each business that stays. Want your link?",
+    body_2: "Hi Sam, would your viewers use this? Easy to show on screen.",
+    body_3: `Hi Sam, about £19.60 a month for each business that stays.\n\n${links.claimUrl}\n\nWant it?`,
     body_4: "Hi Sam, I'll stop here. The offer stands if you reply later.",
   };
-  assert.deepEqual(partnerProblems(good, url), []);
-  assert.ok(partnerProblems({ ...good, body: good.body.replace("40%", "a share") }, url).some((p) => p.includes("40%")));
-  assert.ok(partnerProblems({ ...good, body: good.body.replace(", for life", "") }, url).some((p) => p.includes("for life")));
-  assert.ok(partnerProblems({ ...good, body_2: `${good.body_2} https://example.com` }, url).some((p) => p.includes("link other")));
-  assert.ok(partnerProblems({ ...good, body: good.body.replace(url, "") }, url).some((p) => p.includes("product link")));
-  assert.ok(partnerProblems({ ...good, subject: "EARN NOW!" }, url).some((p) => p.includes("shouts")));
+  assert.deepEqual(partnerProblems(good, links), []);
+  assert.deepEqual(partnerProblems({ ...good, body: good.body.replace(`${links.previewUrl}\n\n`, "") }, { ...links, previewUrl: null }), []);
+  assert.ok(partnerProblems({ ...good, body: good.body.replace("40%", "a share") }, links).some((p) => p.includes("40%")));
+  assert.ok(partnerProblems({ ...good, body: good.body.replace(", for life", "") }, links).some((p) => p.includes("for life")));
+  assert.ok(partnerProblems({ ...good, body: good.body.replace(", at no cost", "") }, links).some((p) => p.includes("costs them nothing")));
+  assert.ok(partnerProblems({ ...good, body_2: `${good.body_2} https://local.macaws.ai` }, links).some((p) => p.includes("not the claim link")));
+  assert.ok(partnerProblems({ ...good, body: good.body.replace(links.claimUrl, "") }, links).some((p) => p.includes("claim link appears 0")));
+  assert.ok(partnerProblems({ ...good, body_3: "Hi Sam, still keen?" }, links).some((p) => p.includes("body_3")));
+  assert.ok(partnerProblems({ ...good, subject: "EARN NOW!" }, links).some((p) => p.includes("shouts")));
 });
 check("a channel description's links are sorted by network; affiliate links are not their site", () => {
   const d = `My agency: https://www.acme-local.com\nIG https://instagram.com/acme.local/ \nJoin https://www.skool.com/gbp-pros\nTry HighLevel free: https://www.gohighlevel.com/?fp_ref=acme\nbook https://calendly.com/acme/15min`;

@@ -132,23 +132,25 @@ export function draftProblems(d: { subject: string; body: string }, previewUrl: 
   return problems;
 }
 
-/* ── Creator partners (the 40% offer): first email + three follow-ups ──── */
+/* ── Creator partners: first email + three follow-ups ─────────────────── */
 
 export type PartnerEmails = { subject: string; body: string; body_2: string; body_3: string; body_4: string };
-export const PARTNER_MAX_WORDS = { body: 130, body_2: 80, body_3: 110, body_4: 60 } as const;
+export const PARTNER_MAX_WORDS = { body: 140, body_2: 80, body_3: 110, body_4: 60 } as const;
 
 /**
- * Rules a partner sequence must pass before any model judges it: the 40% and
- * "lifetime" said plainly in the first email, the product link once there and
- * no link other than it anywhere, short, a calm subject, nothing unfilled.
+ * Rules a creator sequence must pass before any model judges it: the offer
+ * plain in the first email (white-label, no cost, 40%, for life), the claim
+ * link once there and again in step 3, only our two links anywhere (the sample
+ * audit, the claim link), short, a calm subject, nothing unfilled.
  */
-export function partnerProblems(p: PartnerEmails, productUrl: string): string[] {
+export function partnerProblems(p: PartnerEmails, links: { claimUrl: string; previewUrl: string | null }): string[] {
   const problems: string[] = [];
   const subject = (p.subject ?? "").trim();
   if (!subject) problems.push("no subject");
   if (subject.length > MAX_SUBJECT) problems.push(`subject over ${MAX_SUBJECT} characters`);
   if (/!/.test(subject) || /\b[A-Z]{4,}\b/.test(subject)) problems.push("subject shouts (! or capitals)");
-  const host = productUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const ours = new Set([links.claimUrl, links.previewUrl].filter(Boolean));
+  const linksIn = (body: string) => (body.match(/https?:\/\/\S+/g) ?? []).map((l) => l.replace(/[).,;:!?]+$/, ""));
   for (const key of ["body", "body_2", "body_3", "body_4"] as const) {
     const body = (p[key] ?? "").trim();
     if (!body) {
@@ -157,14 +159,16 @@ export function partnerProblems(p: PartnerEmails, productUrl: string): string[] 
     }
     const words = body.split(/\s+/).length;
     if (words > PARTNER_MAX_WORDS[key]) problems.push(`${key} is ${words} words (max ${PARTNER_MAX_WORDS[key]})`);
-    const links = (body.match(/https?:\/\/\S+/g) ?? []).map((l) => l.replace(/[).,;:!?]+$/, ""));
-    if (links.some((l) => l.replace(/^https?:\/\//, "").replace(/\/$/, "") !== host)) problems.push(`${key} has a link other than ${productUrl}`);
+    if (linksIn(body).some((l) => !ours.has(l))) problems.push(`${key} has a link that is not the claim link or the audit`);
     if (/\{\{|\}\}|\[(first ?name|name|channel|link)\]/i.test(body)) problems.push(`${key} has an unfilled placeholder`);
   }
   const first = (p.body ?? "").trim();
+  if (!/white[- ]label/i.test(first)) problems.push('the first email does not say "white-label"');
   if (!/40\s?%/.test(first)) problems.push("the first email does not say 40%");
   if (!/life|lifetime|for as long as/i.test(first)) problems.push("the first email does not say the commission is for life");
-  const toProduct = (first.match(/https?:\/\/\S+/g) ?? []).length;
-  if (toProduct !== 1) problems.push(`the product link appears ${toProduct} times in the first email (want 1)`);
+  if (!/no cost|free|nothing to pay|no fee/i.test(first)) problems.push("the first email does not say it costs them nothing");
+  const claims = linksIn(first).filter((l) => l === links.claimUrl).length;
+  if (claims !== 1) problems.push(`the claim link appears ${claims} times in the first email (want 1)`);
+  if (!linksIn(p.body_3 ?? "").includes(links.claimUrl)) problems.push("body_3 must include the claim link");
   return problems;
 }
