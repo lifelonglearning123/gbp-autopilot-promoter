@@ -253,9 +253,12 @@ export const creators = pgTable(
     recentVideos: jsonb("recent_videos").$type<{ id: string; title: string; publishedAt: string }[]>().notNull().default([]),
     /** What found it, e.g. the search phrase. */
     foundBy: text("found_by"),
-    /** new → qualified → enriched → in_pipeline; or skipped / educator (parked until the partner offer). */
+    /**
+     * new → qualified → enriched → in_pipeline (agencies); new → educator | audience →
+     * partner_pipeline | partner_no_email | partner_known (the 40% partner offer); or skipped.
+     */
     status: text("status").notNull().default("new"),
-    /** agency | educator | skip */
+    /** agency | educator | audience | skip */
     kind: text("kind"),
     fitScore: integer("fit_score"),
     usesGhl: boolean("uses_ghl"),

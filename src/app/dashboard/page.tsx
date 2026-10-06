@@ -69,7 +69,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           ["Failed the check", n.needs_review],
           ["YouTube channels found", n.yt_found],
           ["YouTube agencies to reach", n.yt_agencies],
-          ["YouTube educators", n.yt_educators],
+          ["Creator partners (40% offer)", n.yt_partners],
           ["DMs / calls due", n.dms_due],
         ].map(([label, v]) => (
           <div key={label as string}>

@@ -14,6 +14,7 @@ import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
 import { closeAnsweredTasks, discoverCreators, enrichCreators, handOverCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
+import { draftPartners, handOverPartners } from "./partners";
 import { draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
 
 /**
@@ -114,14 +115,18 @@ export async function backfillFollowUps(limit: number, deadline: number, log: Lo
 
 /* ── Push: drafts whose hold has passed ─────────────────────────────────── */
 
-/** Push due emails: the GHL list to the main campaign, YouTube creators to theirs. */
+type Track = "main" | "youtube" | "partner";
+const TRACK_NAME: Record<Track, string> = { main: "main", youtube: "YouTube creators'", partner: "creator partners'" };
+
+/** Push due emails: the GHL list to the main campaign, YouTube agencies and creator partners to theirs. */
 export async function pushDue(limit: number, log: Log): Promise<number> {
-  const main = await pushInto(env.INSTANTLY_CAMPAIGN_ID, false, limit, log);
-  const yt = await pushInto(env.INSTANTLY_YT_CAMPAIGN_ID, true, limit, log);
-  return main + yt;
+  const main = await pushInto(env.INSTANTLY_CAMPAIGN_ID, "main", limit, log);
+  const yt = await pushInto(env.INSTANTLY_YT_CAMPAIGN_ID, "youtube", limit, log);
+  const partners = await pushInto(env.INSTANTLY_PARTNER_CAMPAIGN_ID, "partner", limit, log);
+  return main + yt + partners;
 }
 
-async function pushInto(campaignId: string | undefined, youtube: boolean, limit: number, log: Log): Promise<number> {
+async function pushInto(campaignId: string | undefined, track: Track, limit: number, log: Log): Promise<number> {
   if (!campaignId) return 0;
   const ready = (await db().execute(sql`
     select m.id, m.subject, m.body, c.email, c.first_name, c.last_name, a.name agency, a.website
@@ -132,7 +137,7 @@ async function pushInto(campaignId: string | undefined, youtube: boolean, limit:
       and (m.guardrail->>'ok')::boolean
       and (m.hold_until is null or m.hold_until <= now())
       and c.email_status = 'valid' and a.status = 'queued'
-      and (c.source like 'youtube:%') = ${youtube}
+      and (case when c.source like 'youtube:%' then 'youtube' when c.source like 'partner:%' then 'partner' else 'main' end) = ${track}
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     order by m.created_at
     limit ${limit}`)) as unknown as {
@@ -180,13 +185,13 @@ async function pushInto(campaignId: string | undefined, youtube: boolean, limit:
     const r = ready[lead.index];
     if (r) await db().update(messages).set({ instantlyCampaignId: campaignId, instantlyLeadId: lead.id, pushedAt: now }).where(eq(messages.id, r.id));
   }
-  log(`pushed ${res.created_leads?.length ?? 0} of ${ready.length} into the ${youtube ? "YouTube creators'" : "main"} campaign`);
+  log(`pushed ${res.created_leads?.length ?? 0} of ${ready.length} into the ${TRACK_NAME[track]} campaign`);
   return res.created_leads?.length ?? 0;
 }
 
 /* ── Replies ────────────────────────────────────────────────────────────── */
 
-const SORTER = `You sort replies to a cold email that offered a marketing agency a white-label Google Business Profile service.
+const SORTER = `You sort replies to a cold email that offered either a marketing agency a white-label Google Business Profile service, or a YouTube creator a referral partnership (40% commission).
 Return ONLY a JSON object: {"kind": string, "confidence": number 0-1, "summary": string (one short sentence)}.
 kind is one of: "interested" (wants to know more, asks a question, wants a call or pricing), "not_now" (polite no for now, maybe later),
 "remove" (asks to be removed, unsubscribed, not interested at all, hostile), "wrong_person" (not them, sends elsewhere),
@@ -194,7 +199,7 @@ kind is one of: "interested" (wants to know more, asks a question, wants a call 
 
 export async function handleReplies(log: Log) {
   const todo = (await db().execute(sql`
-    select r.id, r.body, r.contact_id, c.email, c.first_name, a.id agency_id, a.name agency, a.domain
+    select r.id, r.body, r.contact_id, c.email, c.first_name, c.source, a.id agency_id, a.name agency, a.domain
     from replies r join contacts c on c.id = r.contact_id join agencies a on a.id = c.agency_id
     where r.classification is null order by r.received_at limit 20`)) as unknown as {
     id: string;
@@ -202,6 +207,7 @@ export async function handleReplies(log: Log) {
     contact_id: string;
     email: string;
     first_name: string | null;
+    source: string;
     agency_id: string;
     agency: string;
     domain: string;
@@ -234,11 +240,13 @@ export async function handleReplies(log: Log) {
     } else if (kind === "interested" || kind === "other" || kind === "not_now" || kind === "wrong_person") {
       // Anything a person should read goes to the owner straight away.
       const urgent = kind === "interested";
+      const partner = r.source.startsWith("partner:");
       await tellOwner(
-        `${urgent ? "Interested reply" : "Reply"}: ${r.agency}`,
+        `${urgent ? "Interested reply" : "Reply"}${partner ? " (creator partner)" : ""}: ${r.agency}`,
         `<p><b>${esc(r.first_name ?? "")} at ${esc(r.agency)}</b> (${esc(r.domain)}) replied — sorted as <b>${esc(kind)}</b>.</p>
          <p>${esc(summary)}</p>
          <blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#333">${esc(r.body.slice(0, 2000)).replace(/\n/g, "<br>")}</blockquote>
+         ${partner && urgent ? `<p><b>A creator wants to promote local.macaws.ai (40% for life).</b> Set up their referral link and send it to them.</p>` : ""}
          <p>Answer it from Instantly's inbox (Unibox). The campaign has already stopped writing to them.</p>`,
       ).catch(() => {});
       await db().update(replies).set({ alertedAt: new Date() }).where(eq(replies.id, r.id));
@@ -304,11 +312,13 @@ export async function hourlyRun(budgetMs: number) {
       await step("youtube find", () => discoverCreators(log));
       await step("youtube qualify", () => qualifyCreators(20, log));
       await step("youtube hand over", () => handOverCreators(30, log));
+      await step("partners hand over", () => handOverPartners(30, log));
       await step("youtube DMs", () => queueTasks(10, log));
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
       await step("verify", () => verifySome(50, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
       await step("draft", () => draftSome(20, deadline, log));
+      await step("partner emails", () => draftPartners(5, log));
     }
   }
   await db().insert(events).values({ source: "bot", type: "run", payload: { lines } });

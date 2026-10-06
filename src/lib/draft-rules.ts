@@ -131,3 +131,40 @@ export function draftProblems(d: { subject: string; body: string }, previewUrl: 
   if (/\{\{|\}\}|\[(first ?name|name|agency)\]/i.test(subject + body)) problems.push("an unfilled placeholder");
   return problems;
 }
+
+/* ── Creator partners (the 40% offer): first email + three follow-ups ──── */
+
+export type PartnerEmails = { subject: string; body: string; body_2: string; body_3: string; body_4: string };
+export const PARTNER_MAX_WORDS = { body: 130, body_2: 80, body_3: 110, body_4: 60 } as const;
+
+/**
+ * Rules a partner sequence must pass before any model judges it: the 40% and
+ * "lifetime" said plainly in the first email, the product link once there and
+ * no link other than it anywhere, short, a calm subject, nothing unfilled.
+ */
+export function partnerProblems(p: PartnerEmails, productUrl: string): string[] {
+  const problems: string[] = [];
+  const subject = (p.subject ?? "").trim();
+  if (!subject) problems.push("no subject");
+  if (subject.length > MAX_SUBJECT) problems.push(`subject over ${MAX_SUBJECT} characters`);
+  if (/!/.test(subject) || /\b[A-Z]{4,}\b/.test(subject)) problems.push("subject shouts (! or capitals)");
+  const host = productUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  for (const key of ["body", "body_2", "body_3", "body_4"] as const) {
+    const body = (p[key] ?? "").trim();
+    if (!body) {
+      problems.push(`${key} is empty`);
+      continue;
+    }
+    const words = body.split(/\s+/).length;
+    if (words > PARTNER_MAX_WORDS[key]) problems.push(`${key} is ${words} words (max ${PARTNER_MAX_WORDS[key]})`);
+    const links = (body.match(/https?:\/\/\S+/g) ?? []).map((l) => l.replace(/[).,;:!?]+$/, ""));
+    if (links.some((l) => l.replace(/^https?:\/\//, "").replace(/\/$/, "") !== host)) problems.push(`${key} has a link other than ${productUrl}`);
+    if (/\{\{|\}\}|\[(first ?name|name|channel|link)\]/i.test(body)) problems.push(`${key} has an unfilled placeholder`);
+  }
+  const first = (p.body ?? "").trim();
+  if (!/40\s?%/.test(first)) problems.push("the first email does not say 40%");
+  if (!/life|lifetime|for as long as/i.test(first)) problems.push("the first email does not say the commission is for life");
+  const toProduct = (first.match(/https?:\/\/\S+/g) ?? []).length;
+  if (toProduct !== 1) problems.push(`the product link appears ${toProduct} times in the first email (want 1)`);
+  return problems;
+}

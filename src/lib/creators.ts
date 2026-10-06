@@ -4,7 +4,7 @@ import { agencies, contacts, controls, creators, messages, outreachTasks, replie
 import { env } from "@/env";
 import { agencyKey, emailType, tidyEmail } from "./contact-rules";
 import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks } from "./creator-rules";
-import { OFFER_FACTS } from "./offer";
+import { OFFER_FACTS, PARTNER_FACTS } from "./offer";
 import { findWebsite } from "./dataforseo";
 import { askJson } from "./openrouter";
 import { channels, recentUploads, searchVideos, videoDescriptions } from "./youtube";
@@ -12,7 +12,8 @@ import { channels, recentUploads, searchVideos, videoDescriptions } from "./yout
 /**
  * YouTube creators posting about local SEO / Google Business Profile:
  *   discover   search recent videos, keep new English channels
- *   qualify    the analysis model: agency/freelancer (a buyer), educator, or skip
+ *   qualify    the analysis model: agency/freelancer (a buyer), educator or
+ *              business-owner audience (partners for the 40% offer), or skip
  *   enrich     public contact details from the description, website and link page
  *   hand over  a creator with an email becomes an agency + contact, so the
  *              normal pipeline researches, audits, writes and emails them
@@ -80,9 +81,10 @@ export async function discoverCreators(log: Log) {
 /* ── Qualify ────────────────────────────────────────────────────────────── */
 
 const QUALIFY = `You sort YouTube channels for GBP Autopilot, a white-label Google Business Profile platform that marketing agencies resell to local businesses (built to work with GoHighLevel).
-Return ONLY a JSON object: {"kind": "agency"|"educator"|"skip", "fit_score": 0-100, "uses_ghl": boolean, "english": boolean, "country": string|null, "reason": string}.
+Return ONLY a JSON object: {"kind": "agency"|"educator"|"audience"|"skip", "fit_score": 0-100, "uses_ghl": boolean, "english": boolean, "country": string|null, "reason": string}.
 - "agency": a marketing agency, freelancer or consultant who SELLS local SEO, Google Business Profile, Google Maps or local marketing services to businesses (a potential buyer to resell our platform).
 - "educator": teaches agencies or marketers (courses, coaching, communities, SaaS/GHL tutorials) — their audience is agencies; a potential referral partner.
+- "audience": makes videos FOR owners of local businesses (trades, salons, clinics, restaurants, small-business tips, getting more customers, Google reviews) — their viewers would buy a £49/month Google Business Profile service for their own business; a potential referral partner.
 - "skip": a local business marketing itself, a big brand, news, or unrelated.
 fit_score: how likely they would resell white-label GBP management to local clients. uses_ghl: they mention GoHighLevel/HighLevel or a GHL SaaS. english: the channel is in English.
 Judge only from what is given.`;
@@ -100,10 +102,10 @@ export async function qualifyCreators(limit: number, log: Log) {
       maxTokens: 500,
     }).catch(() => ({ data: null }));
     if (!data) return;
-    const kind = !data.english ? "skip" : ["agency", "educator"].includes(data.kind) ? data.kind : "skip";
+    const kind = !data.english ? "skip" : ["agency", "educator", "audience"].includes(data.kind) ? data.kind : "skip";
     const fit = Math.max(0, Math.min(100, Math.round(Number(data.fit_score) || 0)));
-    // Educators wait for the partner offer; weak agency fits are not written to.
-    const status = kind === "skip" || (kind === "agency" && fit < 40) ? "skipped" : kind === "educator" ? "educator" : "qualified";
+    // Educators and business-owner audiences get the partner offer; weak agency fits are not written to.
+    const status = kind === "skip" || (kind === "agency" && fit < 40) ? "skipped" : kind === "agency" ? "qualified" : kind;
     await db()
       .update(creators)
       .set({ kind, fitScore: fit, usesGhl: !!data.uses_ghl, country: c.country ?? data.country, qualifyNotes: data.reason, status, updatedAt: new Date() })
@@ -136,7 +138,7 @@ export async function enrichCreators(limit: number, log: Log) {
   const todo = await db()
     .select()
     .from(creators)
-    .where(inArray(creators.status, ["qualified", "educator"]))
+    .where(inArray(creators.status, ["qualified", "educator", "audience"]))
     .orderBy(asc(creators.updatedAt))
     .limit(limit);
   let n = 0;
@@ -181,7 +183,7 @@ export async function enrichCreators(limit: number, log: Log) {
         links,
         emails: uniq(emails, (e) => e.email).slice(0, 5),
         phones: uniq(phones, (p) => p.phone.replace(/\D/g, "")).slice(0, 3),
-        status: c.status === "educator" ? "educator" : "enriched",
+        status: c.status === "qualified" ? "enriched" : c.status,
         updatedAt: new Date(),
       })
       .where(eq(creators.id, c.id));
@@ -257,6 +259,15 @@ Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script"
 - phone_script: 60-100 words for a short call: who you are, why them (their channel and videos), the offer in one line, ask for 10 minutes or permission to email the audit. Plain spoken English.
 UK English. No hype, no flattery, no placeholders. Never claim to be from HighLevel.`;
 
+const PARTNER_DMS = `You write short direct messages from Chao, founder of macaws.ai, to a YouTube creator, inviting them to become a referral partner.
+${PARTNER_FACTS}
+
+Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script": string}.
+- instagram: 25-50 words, casual, mention one of their recent videos by its topic, say their audience fits local.macaws.ai and that partners earn 40% of what every referred business pays, for life. Ask if they'd like a referral link. No links.
+- skool: 40-70 words, a little fuller than Instagram, same content, friendly and community-appropriate. No links.
+- phone_script: 60-100 words for a short call: who you are, why them (their channel), the 40% lifetime offer in one line, ask whether you can send their referral link.
+UK English. No hype, no flattery, no placeholders, no terms beyond the facts given.`;
+
 /**
  * For each creator: a message per network they publish (Instagram, Skool) and
  * a call script if they publish a phone. Due 3 days after their first email
@@ -265,7 +276,7 @@ UK English. No hype, no flattery, no placeholders. Never claim to be from HighLe
 export async function queueTasks(limit: number, log: Log) {
   const ids = (await db().execute(sql`
     select cr.id from creators cr
-    where cr.status in ('in_pipeline', 'no_email')
+    where cr.status in ('in_pipeline', 'no_email', 'partner_pipeline', 'partner_no_email')
       and not exists (select 1 from outreach_tasks t where t.creator_id = cr.id)
       and (cr.links ? 'instagram' or cr.links ? 'skool' or jsonb_array_length(cr.phones) > 0)
     limit ${limit}`)) as unknown as { id: string }[];
@@ -275,7 +286,7 @@ export async function queueTasks(limit: number, log: Log) {
     const recent = c.recentVideos.slice(0, 4).map((v) => `- ${v.title}`).join("\n");
     const { data } = await askJson<{ instagram: string; skool: string; phone_script: string }>({
       model: env.WRITER_MODELS.split(",")[0].trim(),
-      system: DMS,
+      system: c.kind === "agency" ? DMS : PARTNER_DMS,
       user: `Channel: ${c.title}
 About them: ${c.qualifyNotes ?? ""}
 Uses GoHighLevel: ${c.usesGhl ? "yes" : "unknown"}

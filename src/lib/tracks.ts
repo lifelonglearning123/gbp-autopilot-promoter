@@ -172,6 +172,7 @@ export async function scheduleCheckIns(log: Log) {
     select distinct on (r.contact_id) r.contact_id, r.received_at
     from replies r
     where r.classification = 'not_now'
+      and not exists (select 1 from contacts c where c.id = r.contact_id and c.source like 'partner:%')
       and not exists (select 1 from messages m where m.contact_id = r.contact_id and m.step = ${STEP_CHECK_IN})
     order by r.contact_id, r.received_at desc`)) as unknown as { contact_id: string; received_at: string }[];
   for (const t of todo) {

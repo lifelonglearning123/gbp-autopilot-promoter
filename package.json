@@ -20,6 +20,7 @@
     "followups": "dotenv -e .env.local -- tsx scripts/followups.ts",
     "rewrite-first": "dotenv -e .env.local -- tsx scripts/rewrite-first.ts",
     "youtube:setup": "dotenv -e .env.local -- tsx scripts/youtube-setup.ts",
+    "partners:setup": "dotenv -e .env.local -- tsx scripts/partners-setup.ts",
     "send-test": "dotenv -e .env.local -- tsx scripts/send-test.ts",
     "import:history": "dotenv -e .env.local -- tsx scripts/import-instantly-history.ts",
     "db:counts": "dotenv -e .env.local -- tsx scripts/db-counts.ts",

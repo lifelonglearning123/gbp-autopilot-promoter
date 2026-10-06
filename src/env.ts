@@ -66,13 +66,15 @@ const schema = z.object({
   YOUTUBE_QUERIES: z
     .string()
     .default(
-      "google business profile|google business profile optimization|GMB ranking|google maps ranking|local SEO|local SEO for agencies|gohighlevel local SEO|google business profile agency|rank on google maps|google business profile reviews",
+      "google business profile|google business profile optimization|GMB ranking|google maps ranking|local SEO|local SEO for agencies|gohighlevel local SEO|google business profile agency|rank on google maps|google business profile reviews|how to get more customers for your small business|marketing for tradesmen|marketing for small business owners|get more google reviews|grow your local business|marketing for contractors|salon marketing tips|dental practice marketing",
     ),
   /** DataForSEO (Google search) for creators who publish no links: their website by name. */
   DATAFORSEO_LOGIN: optional,
   DATAFORSEO_PASSWORD: optional,
   /** The Instantly campaign for creators (its own copy and results). */
   INSTANTLY_YT_CAMPAIGN_ID: optional,
+  /** The Instantly campaign for creator partners (the 40% local.macaws.ai offer). */
+  INSTANTLY_PARTNER_CAMPAIGN_ID: optional,
 });
 
 type Env = z.infer<typeof schema>;

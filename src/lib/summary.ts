@@ -31,7 +31,8 @@ export async function dayNumbers() {
       (select count(*) from creators)::int yt_found,
       (select count(*) from creators where created_at > now() - interval '24 hours')::int yt_new,
       (select count(*) from creators where status in ('qualified', 'enriched', 'in_pipeline', 'no_email'))::int yt_agencies,
-      (select count(*) from creators where status = 'educator')::int yt_educators,
+      (select count(*) from creators where kind in ('educator', 'audience') and status <> 'skipped')::int yt_partners,
+      (select count(*) from messages m join contacts c on c.id = m.contact_id where c.source like 'partner:%' and m.step = 1 and m.pushed_at is not null)::int partners_emailed,
       (select count(*) from outreach_tasks where done_at is null and skipped_at is null and replied_at is null and due_at <= now())::int dms_due,
       (select count(*) from outreach_tasks where done_at > now() - interval '24 hours')::int dms_sent`)) as unknown as Record<string, number>[];
   return n;
@@ -70,7 +71,7 @@ export async function dailySummaryHtml(): Promise<{ subject: string; html: strin
   <h3>So far</h3>
   <table>${row("In the campaign", n.total_pushed)}${row("Sent", n.total_sent)}${row("Replies", n.total_replies)}${row("Signed up", n.total_signups)}${row("Agencies still to research", n.to_research)}${row("Drafts that failed the check (not sent)", n.needs_review)}</table>
   <h3>YouTube creators</h3>
-  <table>${row("Channels found (new in 24h)", `${n.yt_found} (${n.yt_new})`)}${row("Agencies / freelancers to reach", n.yt_agencies)}${row("Educators (waiting for the partner offer)", n.yt_educators)}${row("DMs and calls due now", n.dms_due)}${row("DMs sent in 24h", n.dms_sent)}</table>
+  <table>${row("Channels found (new in 24h)", `${n.yt_found} (${n.yt_new})`)}${row("Agencies / freelancers to reach", n.yt_agencies)}${row("Partners for the 40% offer (educators, business-owner channels)", n.yt_partners)}${row("Partners emailed so far", n.partners_emailed)}${row("DMs and calls due now", n.dms_due)}${row("DMs sent in 24h", n.dms_sent)}</table>
   ${n.dms_due ? `<p><a href="${dash.replace(/\/dashboard$/, "/queue")}">Open the DM queue (${n.dms_due} due)</a></p>` : ""}
   <h3>Going out next (${next.length})</h3>
   <p style="color:#555">These go into the campaign once their 24-hour hold ends, unless you stop them.</p>
