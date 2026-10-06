@@ -5,6 +5,7 @@ import { env } from "@/env";
 import { agencyKey, emailType, tidyEmail } from "./contact-rules";
 import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks } from "./creator-rules";
 import { OFFER_FACTS } from "./offer";
+import { findWebsite } from "./dataforseo";
 import { askJson } from "./openrouter";
 import { channels, recentUploads, searchVideos, videoDescriptions } from "./youtube";
 
@@ -148,6 +149,11 @@ export async function enrichCreators(limit: number, log: Log) {
     const emails = emailsIn(desc).map((email) => ({ email, source: youtube }));
     const phones = phonesIn(desc).map((phone) => ({ phone, source: youtube }));
 
+    // No site published anywhere on YouTube: find it on Google by their name.
+    if (!links.website && !links.linktree) {
+      const site = await findWebsite(c.title, c.country).catch(() => null);
+      if (site) links.website = site;
+    }
     // Their link page and website: more links, and published emails and phones.
     for (const kind of ["linktree", "website"] as const) {
       const url = links[kind];

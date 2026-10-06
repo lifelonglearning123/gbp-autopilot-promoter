@@ -68,6 +68,9 @@ const schema = z.object({
     .default(
       "google business profile|google business profile optimization|GMB ranking|google maps ranking|local SEO|local SEO for agencies|gohighlevel local SEO|google business profile agency|rank on google maps|google business profile reviews",
     ),
+  /** DataForSEO (Google search) for creators who publish no links: their website by name. */
+  DATAFORSEO_LOGIN: optional,
+  DATAFORSEO_PASSWORD: optional,
   /** The Instantly campaign for creators (its own copy and results). */
   INSTANTLY_YT_CAMPAIGN_ID: optional,
 });
