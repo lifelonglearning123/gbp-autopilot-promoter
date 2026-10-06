@@ -1,6 +1,7 @@
 import { env } from "@/env";
 import { enableSequence, shortenClaimLinks, syncFollowUps } from "@/lib/followups";
 import { backfillFollowUps } from "@/lib/pipeline";
+import { discoverCreators, enrichCreators, handOverCreators, qualifyCreators, queueTasks } from "@/lib/creators";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ export const maxDuration = 800;
  *   ?do=followups   write follow-ups for leads missing them
  *   ?do=sync        put follow-ups on the Instantly leads
  *   ?do=shorten     swap long claim links in unsent emails for short ones, then re-sync
+ *   ?do=youtube     one round of YouTube: find, qualify, collect details, hand over, write DMs (nothing sent)
  *   ?do=enable      switch the campaign to the four-step sequence (refuses if any active lead lacks them)
  */
 export async function POST(req: Request) {
@@ -26,6 +28,12 @@ export async function POST(req: Request) {
   else if (task === "shorten") {
     lines.push(`${await shortenClaimLinks()} emails now carry the short claim link`);
     await syncFollowUps(500, log);
+  } else if (task === "youtube") {
+    await discoverCreators(log);
+    await qualifyCreators(40, log);
+    await enrichCreators(30, log);
+    await handOverCreators(30, log);
+    await queueTasks(15, log);
   } else if (task === "enable") lines.push(await enableSequence());
   else return Response.json({ error: "unknown task" }, { status: 400 });
   return Response.json({ ok: true, lines });
