@@ -6,7 +6,7 @@ import { agencyKey, emailType, tidyEmail } from "./contact-rules";
 import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks } from "./creator-rules";
 import { OFFER_FACTS } from "./offer";
 import { askJson } from "./openrouter";
-import { channels, recentUploads, searchVideos } from "./youtube";
+import { channels, recentUploads, searchVideos, videoDescriptions } from "./youtube";
 
 /**
  * YouTube creators posting about local SEO / Google Business Profile:
@@ -141,7 +141,9 @@ export async function enrichCreators(limit: number, log: Log) {
   let n = 0;
   for (const c of todo.filter((t) => Object.keys(t.links).length === 0 && t.emails.length === 0)) {
     const youtube = `https://www.youtube.com/channel/${c.channelId}`;
-    const desc = c.description ?? "";
+    // The channel description plus its recent videos' full descriptions (where the links usually are).
+    const videoText = env.YOUTUBE_API_KEY ? (await videoDescriptions(c.recentVideos.map((v) => v.id)).catch(() => [])).join("\n") : "";
+    const desc = `${c.description ?? ""}\n${videoText}`;
     const links: Record<string, string> = { youtube, ...sortLinks(desc) };
     const emails = emailsIn(desc).map((email) => ({ email, source: youtube }));
     const phones = phonesIn(desc).map((phone) => ({ phone, source: youtube }));

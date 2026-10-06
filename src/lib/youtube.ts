@@ -75,6 +75,17 @@ export async function channels(ids: string[]): Promise<Channel[]> {
   }));
 }
 
+/**
+ * Full descriptions of videos (1 unit per 50). Creators put their website,
+ * socials, booking link and email under their videos; the channel's own
+ * "links" section is not in the API.
+ */
+export async function videoDescriptions(ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const r = await get<{ items?: { snippet: { description?: string } }[] }>("videos", { part: "snippet", id: ids.slice(0, 50).join(",") });
+  return (r.items ?? []).map((v) => v.snippet.description ?? "");
+}
+
 /** The channel's latest uploads (1 unit). */
 export async function recentUploads(playlistId: string, n = 6) {
   const r = await get<{ items?: { snippet: { title: string; publishedAt: string; resourceId: { videoId: string } } }[] }>("playlistItems", {
