@@ -89,14 +89,16 @@ Judge only from what is given.`;
 export async function qualifyCreators(limit: number, log: Log) {
   const todo = await db().select().from(creators).where(eq(creators.status, "new")).orderBy(asc(creators.createdAt)).limit(limit);
   const tally: Record<string, number> = {};
-  for (const c of todo) {
+  // Four at a time: one by one, a batch outlasts the server's time limit.
+  const queue = [...todo];
+  const one = async (c: (typeof todo)[number]) => {
     const { data } = await askJson<{ kind: string; fit_score: number; uses_ghl: boolean; english: boolean; country: string | null; reason: string }>({
       model: env.ANALYSIS_MODEL,
       system: QUALIFY,
       user: `Channel: ${c.title} (${c.handle ?? "-"}), ${c.subscribers ?? "?"} subscribers, ${c.videoCount ?? "?"} videos, country ${c.country ?? "?"}\nFound by searching: ${c.foundBy}\nDescription:\n${(c.description ?? "").slice(0, 3000)}\nRecent videos:\n${c.recentVideos.map((v) => `- ${v.title}`).join("\n")}`,
       maxTokens: 500,
     }).catch(() => ({ data: null }));
-    if (!data) continue;
+    if (!data) return;
     const kind = !data.english ? "skip" : ["agency", "educator"].includes(data.kind) ? data.kind : "skip";
     const fit = Math.max(0, Math.min(100, Math.round(Number(data.fit_score) || 0)));
     // Educators wait for the partner offer; weak agency fits are not written to.
@@ -106,7 +108,10 @@ export async function qualifyCreators(limit: number, log: Log) {
       .set({ kind, fitScore: fit, usesGhl: !!data.uses_ghl, country: c.country ?? data.country, qualifyNotes: data.reason, status, updatedAt: new Date() })
       .where(eq(creators.id, c.id));
     tally[status] = (tally[status] ?? 0) + 1;
-  }
+  };
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    for (let c = queue.shift(); c; c = queue.shift()) await one(c).catch(() => {});
+  }));
   if (todo.length) log(`youtube qualified: ${JSON.stringify(tally)}`);
 }
 

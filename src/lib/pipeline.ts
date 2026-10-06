@@ -300,9 +300,9 @@ export async function hourlyRun(budgetMs: number) {
       await step("send notes", () => sendDueNotes(log));
       await step("intake", () => dailyIntake(log));
       // YouTube creators: find, sort, collect details, hand over, write DMs, into GHL.
+      await step("youtube details", () => enrichCreators(15, log));
       await step("youtube find", () => discoverCreators(log));
       await step("youtube qualify", () => qualifyCreators(20, log));
-      await step("youtube details", () => enrichCreators(15, log));
       await step("youtube hand over", () => handOverCreators(30, log));
       await step("youtube DMs", () => queueTasks(10, log));
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));

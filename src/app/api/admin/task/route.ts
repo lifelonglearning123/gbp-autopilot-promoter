@@ -1,3 +1,6 @@
+import { after } from "next/server";
+import { db } from "@/db/client";
+import { events } from "@/db/schema";
 import { env } from "@/env";
 import { enableSequence, shortenClaimLinks, syncFollowUps } from "@/lib/followups";
 import { backfillFollowUps } from "@/lib/pipeline";
@@ -29,11 +32,17 @@ export async function POST(req: Request) {
     lines.push(`${await shortenClaimLinks()} emails now carry the short claim link`);
     await syncFollowUps(500, log);
   } else if (task === "youtube") {
-    await discoverCreators(log);
-    await qualifyCreators(40, log);
-    await enrichCreators(30, log);
-    await handOverCreators(30, log);
-    await queueTasks(15, log);
+    // Answers at once and works on after the reply (a long-held request gets dropped).
+    // Work already sorted goes first, so a round always moves creators forward.
+    after(async () => {
+      await enrichCreators(30, log);
+      await handOverCreators(30, log);
+      await queueTasks(15, log);
+      await discoverCreators(log);
+      await qualifyCreators(24, log);
+      await db().insert(events).values({ source: "bot", type: "run", payload: { lines: ["youtube round:", ...lines] } });
+    });
+    return Response.json({ ok: true, started: "youtube round" });
   } else if (task === "enable") lines.push(await enableSequence());
   else return Response.json({ error: "unknown task" }, { status: 400 });
   return Response.json({ ok: true, lines });
