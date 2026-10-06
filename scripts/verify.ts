@@ -10,7 +10,7 @@ import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
 import { actionLink, signatureOk } from "../src/lib/links";
 import { followUpProblems, templateFollowUps } from "../src/lib/draft-rules";
-import { emailsIn, instagramHandle, messageLink, phonesIn, sortLinks } from "../src/lib/creator-rules";
+import { emailsIn, instagramHandle, messageLink, phonesIn, sortLinks, tiktokHandle, tiktokProfile } from "../src/lib/creator-rules";
 import { sequenceSteps } from "../src/lib/instantly";
 import { countryOf, draftProblems, partnerProblems, pickSampleTarget, sameBusiness, sampleTargets, townOf } from "../src/lib/draft-rules";
 
@@ -206,6 +206,35 @@ check("a creator sequence states the offer plainly and links only the claim link
   assert.ok(partnerProblems({ ...good, body: good.body.replace(links.claimUrl, "") }, links).some((p) => p.includes("claim link appears 0")));
   assert.ok(partnerProblems({ ...good, body_3: "Hi Sam, still keen?" }, links).some((p) => p.includes("body_3")));
   assert.ok(partnerProblems({ ...good, subject: "EARN NOW!" }, links).some((p) => p.includes("shouts")));
+});
+check("a TikTok handle comes from a profile or video link, nothing else", () => {
+  assert.equal(tiktokHandle("https://www.tiktok.com/@Jo.Smith/video/7312?lang=en"), "jo.smith");
+  assert.equal(tiktokHandle("https://tiktok.com/@local_seo_tips"), "local_seo_tips");
+  assert.equal(tiktokHandle("https://www.tiktok.com/tag/localseo"), null);
+  assert.equal(tiktokHandle("https://example.com/@jo"), null);
+});
+check("a TikTok profile page gives its bio, bio link, avatar and counts; a challenge page gives null", () => {
+  const data = {
+    __DEFAULT_SCOPE__: {
+      "webapp.user-detail": {
+        userInfo: {
+          user: { uniqueId: "jo", nickname: "Jo | Local SEO", signature: "Reviews tips 📍UK\njo@joseo.co.uk", bioLink: { link: "https://linktr.ee/jo" }, avatarLarger: "https://p16.tiktokcdn.com/a.jpeg" },
+          stats: { followerCount: 12000, videoCount: 240 },
+        },
+      },
+    },
+  };
+  const page = `<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(data)}</script></html>`;
+  assert.deepEqual(tiktokProfile(page), {
+    nickname: "Jo | Local SEO",
+    bio: "Reviews tips 📍UK\njo@joseo.co.uk",
+    bioLink: "https://linktr.ee/jo",
+    avatar: "https://p16.tiktokcdn.com/a.jpeg",
+    followers: 12000,
+    videos: 240,
+  });
+  assert.equal(tiktokProfile("<html>Please wait...</html>"), null);
+  assert.equal(tiktokProfile(`<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">{"__DEFAULT_SCOPE__":{}}</script>`), null);
 });
 check("a channel description's links are sorted by network; affiliate links are not their site", () => {
   const d = `My agency: https://www.acme-local.com\nIG https://instagram.com/acme.local/ \nJoin https://www.skool.com/gbp-pros\nTry HighLevel free: https://www.gohighlevel.com/?fp_ref=acme\nbook https://calendly.com/acme/15min`;

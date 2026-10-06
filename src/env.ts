@@ -68,7 +68,15 @@ const schema = z.object({
     .default(
       "google business profile|google business profile optimization|GMB ranking|google maps ranking|local SEO|local SEO for agencies|gohighlevel local SEO|google business profile agency|rank on google maps|google business profile reviews|how to get more customers for your small business|marketing for tradesmen|marketing for small business owners|get more google reviews|grow your local business|marketing for contractors|salon marketing tips|dental practice marketing",
     ),
-  /** DataForSEO (Google search) for creators who publish no links: their website by name. */
+  /** TikTok creators, found through Google (TikTok has no public search API): what to search for, separated by "|". */
+  TIKTOK_QUERIES: z
+    .string()
+    .default(
+      "google business profile|google reviews for business|local SEO|google maps ranking|marketing for small business|marketing for tradesmen|small business tips|get more customers local business|gohighlevel|marketing agency owner",
+    ),
+  /** Google searches for TikTok creators a day (one a run). */
+  TIKTOK_DAILY_SEARCHES: z.coerce.number().default(24),
+  /** DataForSEO (Google search): TikTok discovery, and the website of creators who publish no links. */
   DATAFORSEO_LOGIN: optional,
   DATAFORSEO_PASSWORD: optional,
   /** The Instantly campaign for creators (its own copy and results). */

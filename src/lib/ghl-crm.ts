@@ -24,7 +24,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return data;
 }
 
-const LABEL: Record<string, string> = { instagram: "Instagram DM", skool: "Skool DM", phone: "Call", youtube: "YouTube" };
+const LABEL: Record<string, string> = { instagram: "Instagram DM", tiktok: "TikTok DM", skool: "Skool DM", phone: "Call", youtube: "YouTube" };
 
 export async function syncCreatorsToGhl(limit: number, log: (l: string) => void) {
   const todo = (await db().execute(sql`

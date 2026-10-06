@@ -12,7 +12,7 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
-import { closeAnsweredTasks, discoverCreators, enrichCreators, qualifyCreators, queueTasks } from "./creators";
+import { closeAnsweredTasks, discoverCreators, discoverTikTok, enrichCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
 import { draftPartners, handOverPartners } from "./partners";
 import { draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
@@ -307,9 +307,10 @@ export async function hourlyRun(budgetMs: number) {
       await step("write check-ins", () => writeDueCheckIns(log));
       await step("send notes", () => sendDueNotes(log));
       await step("intake", () => dailyIntake(log));
-      // YouTube creators: find, sort, collect details, hand over, write DMs, into GHL.
+      // YouTube and TikTok creators: find, sort, collect details, hand over, write DMs, into GHL.
       await step("youtube details", () => enrichCreators(15, log));
       await step("youtube find", () => discoverCreators(log));
+      await step("tiktok find", () => discoverTikTok(log));
       await step("youtube qualify", () => qualifyCreators(20, log));
       await step("youtube hand over", () => handOverPartners(30, log));
       await step("youtube DMs", () => queueTasks(10, log));

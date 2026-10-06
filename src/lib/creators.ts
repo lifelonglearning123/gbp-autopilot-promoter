@@ -2,9 +2,9 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { controls, creators, messages, outreachTasks, replies } from "@/db/schema";
 import { env } from "@/env";
-import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks } from "./creator-rules";
+import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks, tiktokHandle, tiktokProfile, type TikTokProfile } from "./creator-rules";
 import { PARTNER_FACTS } from "./offer";
-import { findWebsite } from "./dataforseo";
+import { findWebsite, searchTikTok } from "./dataforseo";
 import { askJson } from "./openrouter";
 import { channels, recentUploads, searchVideos, videoDescriptions } from "./youtube";
 
@@ -76,9 +76,75 @@ export async function discoverCreators(log: Log) {
   log(`youtube: ${found.size} channels in results, ${added} new`);
 }
 
+/* ── Discover on TikTok (through Google) ────────────────────────────────── */
+
+/** TikTok creators are kept as creators with channel_id "tiktok:<handle>". */
+export const isTikTok = (channelId: string) => channelId.startsWith("tiktok:");
+export const tiktokUrl = (channelId: string) => `https://www.tiktok.com/@${channelId.slice("tiktok:".length)}`;
+
+/** The profile as TikTok shows it, or null when TikTok does not answer with it. */
+export async function readTikTok(handle: string): Promise<TikTokProfile | null> {
+  return tiktokProfile(await html(`https://www.tiktok.com/@${handle}`));
+}
+
+/**
+ * One phrase a run, US and UK results in turn, at most TIKTOK_DAILY_SEARCHES
+ * a day. Each new handle's profile is read for its bio, bio link and counts;
+ * a profile TikTok will not show is kept from what Google showed.
+ */
+export async function discoverTikTok(log: Log) {
+  if (!env.DATAFORSEO_LOGIN) return;
+  const phrases = env.TIKTOK_QUERIES.split("|").map((p) => p.trim()).filter(Boolean);
+  const [row] = await db().select().from(controls).where(eq(controls.key, "tiktok")).limit(1);
+  const state = (row?.value as { next?: number; day?: string; searches?: number } | undefined) ?? {};
+  const today = new Date().toISOString().slice(0, 10);
+  const searches = state.day === today ? (state.searches ?? 0) : 0;
+  if (searches >= env.TIKTOK_DAILY_SEARCHES) return;
+  const next = (state.next ?? 0) + 1;
+  const phrase = phrases[(state.next ?? 0) % phrases.length];
+  const country = Math.floor((state.next ?? 0) / phrases.length) % 2 === 0 ? "US" : "GB";
+  const results = await searchTikTok(phrase, country);
+  await db()
+    .insert(controls)
+    .values({ key: "tiktok", value: { next, day: today, searches: searches + 1 } })
+    .onConflictDoUpdate({ target: controls.key, set: { value: { next, day: today, searches: searches + 1 }, updatedAt: new Date() } });
+
+  // What Google showed, by handle: the videos' titles and snippets.
+  const found = new Map<string, { title: string; snippet: string }[]>();
+  for (const r of results) {
+    const h = tiktokHandle(r.url);
+    if (h) found.set(h, [...(found.get(h) ?? []), { title: r.title, snippet: r.snippet }]);
+  }
+  const ids = [...found.keys()].map((h) => `tiktok:${h}`);
+  const known = new Set((await db().select({ id: creators.channelId }).from(creators).where(inArray(creators.channelId, [...ids, ""]))).map((r) => r.id));
+  let added = 0;
+  for (const [handle, seen] of found) {
+    if (known.has(`tiktok:${handle}`)) continue;
+    const p = await readTikTok(handle).catch(() => null);
+    // Too new to be a business, or too big to answer a cold email.
+    if (p && ((p.videos ?? 0) < 5 || (p.followers ?? 0) > 1_000_000)) continue;
+    const videos = seen.map((v, i) => ({ id: `${handle}-${i}`, title: v.title.replace(/\s*\|\s*TikTok\s*$/i, "").trim(), publishedAt: "" }));
+    await db()
+      .insert(creators)
+      .values({
+        channelId: `tiktok:${handle}`,
+        title: p?.nickname ?? handle,
+        handle: `@${handle}`,
+        subscribers: p?.followers ?? null,
+        videoCount: p?.videos ?? null,
+        description: [p?.bio ?? "", p?.bioLink ? `Bio link: ${p.bioLink}` : "", ...seen.map((v) => v.snippet)].filter(Boolean).join("\n"),
+        recentVideos: videos,
+        foundBy: `tiktok: ${phrase} (${country})`,
+      })
+      .onConflictDoNothing();
+    added++;
+  }
+  log(`tiktok: ${found.size} accounts in Google results for "${phrase}" (${country}), ${added} new`);
+}
+
 /* ── Qualify ────────────────────────────────────────────────────────────── */
 
-const QUALIFY = `You sort YouTube channels for GBP Autopilot, a white-label Google Business Profile platform that marketing agencies resell to local businesses (built to work with GoHighLevel).
+const QUALIFY = `You sort YouTube channels and TikTok accounts for GBP Autopilot, a white-label Google Business Profile platform that marketing agencies resell to local businesses (built to work with GoHighLevel).
 Return ONLY a JSON object: {"kind": "agency"|"educator"|"audience"|"skip", "fit_score": 0-100, "uses_ghl": boolean, "english": boolean, "country": string|null, "reason": string}.
 - "agency": a marketing agency, freelancer or consultant who SELLS local SEO, Google Business Profile, Google Maps or local marketing services to businesses (a potential buyer to resell our platform).
 - "educator": teaches agencies or marketers (courses, coaching, communities, SaaS/GHL tutorials) — their audience is agencies; a potential referral partner.
@@ -96,7 +162,7 @@ export async function qualifyCreators(limit: number, log: Log) {
     const { data } = await askJson<{ kind: string; fit_score: number; uses_ghl: boolean; english: boolean; country: string | null; reason: string }>({
       model: env.ANALYSIS_MODEL,
       system: QUALIFY,
-      user: `Channel: ${c.title} (${c.handle ?? "-"}), ${c.subscribers ?? "?"} subscribers, ${c.videoCount ?? "?"} videos, country ${c.country ?? "?"}\nFound by searching: ${c.foundBy}\nDescription:\n${(c.description ?? "").slice(0, 3000)}\nRecent videos:\n${c.recentVideos.map((v) => `- ${v.title}`).join("\n")}`,
+      user: `${isTikTok(c.channelId) ? "TikTok account" : "YouTube channel"}: ${c.title} (${c.handle ?? "-"}), ${c.subscribers ?? "?"} ${isTikTok(c.channelId) ? "followers" : "subscribers"}, ${c.videoCount ?? "?"} videos, country ${c.country ?? "?"}\nFound by searching: ${c.foundBy}\nDescription:\n${(c.description ?? "").slice(0, 3000)}\nRecent videos:\n${c.recentVideos.map((v) => `- ${v.title}`).join("\n")}`,
       maxTokens: 500,
     }).catch(() => ({ data: null }));
     if (!data) return;
@@ -141,15 +207,17 @@ export async function enrichCreators(limit: number, log: Log) {
     .limit(limit);
   let n = 0;
   for (const c of todo.filter((t) => Object.keys(t.links).length === 0 && t.emails.length === 0)) {
-    const youtube = `https://www.youtube.com/channel/${c.channelId}`;
-    // The channel description plus its recent videos' full descriptions (where the links usually are).
-    const videoText = env.YOUTUBE_API_KEY ? (await videoDescriptions(c.recentVideos.map((v) => v.id)).catch(() => [])).join("\n") : "";
+    const tiktok = isTikTok(c.channelId);
+    const home = tiktok ? tiktokUrl(c.channelId) : `https://www.youtube.com/channel/${c.channelId}`;
+    // YouTube: the channel description plus its recent videos' full descriptions (where the links usually are).
+    // TikTok: the bio and its bio link, kept in the description when found.
+    const videoText = !tiktok && env.YOUTUBE_API_KEY ? (await videoDescriptions(c.recentVideos.map((v) => v.id)).catch(() => [])).join("\n") : "";
     const desc = `${c.description ?? ""}\n${videoText}`;
-    const links: Record<string, string> = { youtube, ...sortLinks(desc) };
-    const emails = emailsIn(desc).map((email) => ({ email, source: youtube }));
-    const phones = phonesIn(desc).map((phone) => ({ phone, source: youtube }));
+    const links: Record<string, string> = { ...sortLinks(desc), [tiktok ? "tiktok" : "youtube"]: home };
+    const emails = emailsIn(desc).map((email) => ({ email, source: home }));
+    const phones = phonesIn(desc).map((phone) => ({ phone, source: home }));
 
-    // No site published anywhere on YouTube: find it on Google by their name.
+    // No site published anywhere on their channel: find it on Google by their name.
     if (!links.website && !links.linktree) {
       const site = await findWebsite(c.title, c.country).catch(() => null);
       if (site) links.website = site;
@@ -203,11 +271,11 @@ export async function creatorContext(agencyId: string): Promise<string | null> {
 
 /* ── Messages for a person to send ──────────────────────────────────────── */
 
-const PARTNER_DMS = `You write short direct messages from Chao, founder of GBP Autopilot, to a YouTube creator, offering them their own white-label GBP Autopilot.
+const PARTNER_DMS = `You write short direct messages from Chao, founder of GBP Autopilot, to a YouTube or TikTok creator, offering them their own white-label GBP Autopilot.
 ${PARTNER_FACTS}
 
 Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script": string}.
-- instagram: 25-50 words, casual, mention one of their recent videos by its topic, say they can have their own white-label Google Business Profile service in their brand at no cost, and earn 40% of what every business on it pays, for life. Ask if they'd like it set up. No links.
+- instagram: 25-50 words, casual (also sent as their TikTok DM), mention one of their recent videos by its topic, say they can have their own white-label Google Business Profile service in their brand at no cost, and earn 40% of what every business on it pays, for life. Ask if they'd like it set up. No links.
 - skool: 40-70 words, a little fuller than Instagram, same content, friendly and community-appropriate. No links.
 - phone_script: 60-100 words for a short call: who you are, why them (their channel), the offer in one line (their own branded version, free, 40% for life), ask whether you can email their claim link.
 UK English. No hype, no flattery, no placeholders, no terms beyond the facts given.`;
@@ -222,7 +290,7 @@ export async function queueTasks(limit: number, log: Log) {
     select cr.id from creators cr
     where cr.status in ('in_pipeline', 'no_email', 'partner_pipeline', 'partner_no_email')
       and not exists (select 1 from outreach_tasks t where t.creator_id = cr.id)
-      and (cr.links ? 'instagram' or cr.links ? 'skool' or jsonb_array_length(cr.phones) > 0)
+      and (cr.links ? 'instagram' or cr.links ? 'skool' or cr.links ? 'tiktok' or jsonb_array_length(cr.phones) > 0)
     limit ${limit}`)) as unknown as { id: string }[];
   const todo = ids.length ? await db().select().from(creators).where(inArray(creators.id, ids.map((r) => r.id))) : [];
   let n = 0;
@@ -250,6 +318,7 @@ ${recent}`,
     const links = c.links;
     const rows: (typeof outreachTasks.$inferInsert)[] = [];
     if (links.instagram && instagramHandle(links.instagram)) rows.push({ creatorId: c.id, channel: "instagram", target: links.instagram, message: data.instagram, dueAt: due });
+    else if (links.tiktok && tiktokHandle(links.tiktok)) rows.push({ creatorId: c.id, channel: "tiktok", target: links.tiktok, message: data.instagram, dueAt: due });
     if (links.skool) rows.push({ creatorId: c.id, channel: "skool", target: links.skool, message: data.skool, dueAt: new Date(due.getTime() + 86_400_000) });
     const phones = c.phones;
     if (phones[0]) rows.push({ creatorId: c.id, channel: "phone", target: phones[0].phone, message: data.phone_script, dueAt: new Date(due.getTime() + 2 * 86_400_000) });

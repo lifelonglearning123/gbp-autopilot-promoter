@@ -68,6 +68,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           ["To research", n.to_research],
           ["Failed the check", n.needs_review],
           ["YouTube channels found", n.yt_found],
+          ["TikTok accounts found", n.tt_found],
           ["Creators (free white-label, 40%)", n.yt_partners],
           ["DMs / calls due", n.dms_due],
         ].map(([label, v]) => (

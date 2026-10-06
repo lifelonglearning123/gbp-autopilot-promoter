@@ -233,7 +233,8 @@ export const suppression = pgTable(
 );
 
 /**
- * A YouTube channel posting about local SEO / Google Business Profile.
+ * A YouTube channel or TikTok account (channel_id "tiktok:<handle>") posting
+ * about local SEO / Google Business Profile or for local business owners.
  * Found by search, qualified by the analysis model, its public contact
  * details collected (each with where it was published). A creator with an
  * email becomes an agency + contact and goes through the same pipeline.
@@ -246,6 +247,7 @@ export const creators = pgTable(
     title: text("title").notNull(),
     handle: text("handle"),
     country: text("country"),
+    /** Subscribers (YouTube) or followers (TikTok). */
     subscribers: integer("subscribers"),
     videoCount: integer("video_count"),
     description: text("description"),
@@ -264,7 +266,7 @@ export const creators = pgTable(
     fitScore: integer("fit_score"),
     usesGhl: boolean("uses_ghl"),
     qualifyNotes: text("qualify_notes"),
-    /** Public links: website, instagram, skool, linktree, x, linkedin, facebook, tiktok. */
+    /** Public links: youtube, tiktok, website, instagram, skool, linktree, x, linkedin, facebook. */
     links: jsonb("links").$type<Record<string, string>>().notNull().default({}),
     emails: jsonb("emails").$type<{ email: string; source: string }[]>().notNull().default([]),
     phones: jsonb("phones").$type<{ phone: string; source: string }[]>().notNull().default([]),
@@ -285,7 +287,7 @@ export const outreachTasks = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     creatorId: uuid("creator_id").notNull().references(() => creators.id, { onDelete: "cascade" }),
-    /** instagram | skool | phone | youtube */
+    /** instagram | tiktok | skool | phone | youtube */
     channel: text("channel").notNull(),
     /** Where to do it: the profile or chat link, or the phone number. */
     target: text("target").notNull(),

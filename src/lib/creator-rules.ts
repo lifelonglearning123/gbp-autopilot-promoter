@@ -79,11 +79,57 @@ export function instagramHandle(url: string): string | null {
 }
 
 /** The link a person taps to message them on that network. */
-export function messageLink(kind: "instagram" | "skool" | "youtube" | "phone", target: string): string {
+export function messageLink(kind: "instagram" | "skool" | "youtube" | "tiktok" | "phone", target: string): string {
   if (kind === "instagram") {
     const h = instagramHandle(target);
     return h ? `https://ig.me/m/${h}` : target;
   }
   if (kind === "phone") return `tel:${target.replace(/[^\d+]/g, "")}`;
   return target;
+}
+
+/* ── TikTok ─────────────────────────────────────────────────────────────── */
+
+/** "https://www.tiktok.com/@jo.smith/video/123?x=1" → "jo.smith"; null if it is not a TikTok profile or video. */
+export function tiktokHandle(url: string): string | null {
+  const host = hostOf(url);
+  if (!host || !/(^|\.)tiktok\.com$/.test(host)) return null;
+  const m = new URL(url).pathname.match(/^\/@([A-Za-z0-9._]{2,24})(\/|$)/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+export type TikTokProfile = {
+  nickname: string;
+  bio: string;
+  bioLink: string | null;
+  avatar: string | null;
+  followers: number | null;
+  videos: number | null;
+};
+
+/**
+ * What a TikTok profile page says about its owner, from the JSON TikTok puts
+ * in the page (__UNIVERSAL_DATA_FOR_REHYDRATION__). Null when the page has none
+ * (TikTok answered with a challenge or an empty shell).
+ */
+export function tiktokProfile(html: string): TikTokProfile | null {
+  const m = html.match(/<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) return null;
+  try {
+    const data = JSON.parse(m[1]);
+    const info = data?.__DEFAULT_SCOPE__?.["webapp.user-detail"]?.userInfo;
+    const u = info?.user;
+    if (!u?.uniqueId) return null;
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    return {
+      nickname: String(u.nickname || u.uniqueId),
+      bio: String(u.signature ?? ""),
+      bioLink: u.bioLink?.link ? String(u.bioLink.link) : null,
+      avatar: u.avatarLarger ? String(u.avatarLarger) : null,
+      followers: n(info?.stats?.followerCount),
+      videos: n(info?.stats?.videoCount),
+    };
+  } catch {
+    return null;
+  }
 }

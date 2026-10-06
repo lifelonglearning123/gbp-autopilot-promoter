@@ -10,10 +10,11 @@ import { partnerProblems, sameBusiness, type PartnerEmails } from "./draft-rules
 import { askJson } from "./openrouter";
 import { PARTNER_FACTS } from "./offer";
 import { claimLink, makeSample, PlatformError, shortClaimUrl, type Sample } from "./platform";
+import { isTikTok, readTikTok } from "./creators";
 import { channels } from "./youtube";
 
 /**
- * The creator offer, for every YouTube creator we qualify (agency, educator,
+ * The creator offer, for every YouTube or TikTok creator we qualify (agency, educator,
  * or a channel for local business owners): their own white-label GBP
  * Autopilot in their brand, at no cost, and 40% for life of what the
  * businesses on it pay.
@@ -95,7 +96,7 @@ export async function handOverPartners(limit: number, log: Log) {
   if (moved.length || todo.length) log(`creators handed over: ${JSON.stringify(tally)}`);
 }
 
-const WRITER = `You write a cold email sequence from Chao, founder of GBP Autopilot, to a YouTube creator, offering them their own white-label GBP Autopilot.
+const WRITER = `You write a cold email sequence from Chao, founder of GBP Autopilot, to a YouTube or TikTok creator (which one is given below), offering them their own white-label GBP Autopilot.
 ${PARTNER_FACTS}
 
 Return ONLY a JSON object: {"subject": string, "body": string, "body_2": string, "body_3": string, "body_4": string}.
@@ -106,7 +107,7 @@ Return ONLY a JSON object: {"subject": string, "body": string, "body_2": string,
 - body_4 (day 14): 25-55 words. A short, friendly last note: you'll stop writing; the offer stands if they reply later.
 - No sign-off or name (added later). The only links allowed are the claim link and the audit link given. No placeholders, no hype (game-changer, skyrocket, passive income machine), no flattery, no invented numbers, results or terms.`;
 
-const CHECKER = `You check a cold email sequence to a YouTube creator before it is sent, against the facts, the channel details and the audit given.
+const CHECKER = `You check a cold email sequence to a YouTube or TikTok creator before it is sent, against the facts, the channel details and the audit given.
 True facts, which the emails may state:
 ${PARTNER_FACTS}
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
@@ -128,15 +129,19 @@ export async function draftPartners(limit: number, log: Log) {
   if (todo.length) log(`creator emails: ${JSON.stringify(tally)}`);
 }
 
-/** Their brand: the channel's avatar as logo, their site's theme colour if they have a site. */
+/** Their brand: the channel's or account's profile picture as logo, their site's theme colour if they have a site. */
 async function brandOf(c: typeof creators.$inferSelect) {
-  const [ch] = env.YOUTUBE_API_KEY ? await channels([c.channelId]).catch(() => []) : [];
+  const avatar = isTikTok(c.channelId)
+    ? ((await readTikTok(c.channelId.slice("tiktok:".length)).catch(() => null))?.avatar ?? null)
+    : env.YOUTUBE_API_KEY
+      ? ((await channels([c.channelId]).catch(() => []))[0]?.avatar ?? null)
+      : null;
   let colour: string | null = null;
   if (c.links.website) {
     const res = await fetch(c.links.website, { redirect: "follow", signal: AbortSignal.timeout(15_000) }).catch(() => null);
     if (res?.ok) colour = themeColour((await res.text()).slice(0, 500_000));
   }
-  return { name: c.title, logoUrl: ch?.avatar ?? null, colour };
+  return { name: c.title, logoUrl: avatar, colour };
 }
 
 async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
@@ -190,11 +195,13 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
   const r = sample?.result;
   const brief = [
     `First name: ${contact.firstName?.trim() || "(unknown)"}`,
-    `Channel: "${c.title}" (${c.subscribers ?? "?"} subscribers, country ${c.country ?? "?"})`,
+    isTikTok(c.channelId)
+      ? `TikTok account: "${c.title}" (${c.handle}, ${c.subscribers ?? "?"} followers, country ${c.country ?? "?"})`
+      : `YouTube channel: "${c.title}" (${c.subscribers ?? "?"} subscribers, country ${c.country ?? "?"})`,
     `Who watches them: ${c.kind === "audience" ? "local business owners" : c.kind === "educator" ? "marketers and agencies (they teach marketing)" : "local businesses and marketers (they run an agency or sell local SEO)"}`,
     `About them: ${c.qualifyNotes ?? ""}`,
     `Recent videos:`,
-    ...c.recentVideos.slice(0, 5).map((v) => `- "${v.title}" (${v.publishedAt.slice(0, 10)})`),
+    ...c.recentVideos.slice(0, 5).map((v) => `- "${v.title}"${v.publishedAt ? ` (${v.publishedAt.slice(0, 10)})` : ""}`),
     ``,
     r
       ? [

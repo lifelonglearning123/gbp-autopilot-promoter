@@ -6,7 +6,7 @@ import { CopyOpen } from "./copy-open";
 
 export const dynamic = "force-dynamic";
 
-const OPEN: Record<string, string> = { instagram: "Copy & open Instagram", skool: "Copy & open Skool", phone: "Copy script & call", youtube: "Open YouTube" };
+const OPEN: Record<string, string> = { instagram: "Copy & open Instagram", tiktok: "Copy & open TikTok", skool: "Copy & open Skool", phone: "Copy script & call", youtube: "Open YouTube" };
 
 /**
  * The DM queue: messages a person sends by hand (Instagram, Skool, calls), due
@@ -29,7 +29,7 @@ export default async function Queue() {
     where t.done_at is null and t.skipped_at is null and t.replied_at is null and t.due_at <= now()
     order by t.due_at limit 50`)) as unknown as {
     id: string;
-    channel: "instagram" | "skool" | "phone" | "youtube";
+    channel: "instagram" | "tiktok" | "skool" | "phone" | "youtube";
     target: string;
     message: string;
     due_at: string;
