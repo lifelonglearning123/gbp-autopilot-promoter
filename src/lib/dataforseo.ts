@@ -34,21 +34,31 @@ export function looksLikeTheirs(channelTitle: string, url: string, resultTitle: 
 
 type SerpItem = { type?: string; url?: string; title?: string; description?: string };
 
-/** One Google search (live, organic), or [] when DataForSEO is not set up or fails. */
+/**
+ * One Google search (live, organic), or [] when DataForSEO is not set up.
+ * Google's side often fails once and answers the next time (40101 "Internal
+ * SE Server Error", 40102 "No Search Results" for a query that has results),
+ * so those get one more try; a second 40102 is an empty answer.
+ */
 async function google(keyword: string, locationCode: number, depth: number): Promise<SerpItem[]> {
   if (!env.DATAFORSEO_LOGIN || !env.DATAFORSEO_PASSWORD) return [];
   const auth = Buffer.from(`${env.DATAFORSEO_LOGIN}:${env.DATAFORSEO_PASSWORD}`).toString("base64");
-  const res = await fetch("https://api.dataforseo.com/v3/serp/google/organic/live/regular", {
-    method: "POST",
-    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
-    body: JSON.stringify([{ keyword, language_code: "en", location_code: locationCode, depth }]),
-    signal: AbortSignal.timeout(60_000),
-  });
-  const body = (await res.json().catch(() => ({}))) as { tasks?: { status_code?: number; status_message?: string; result?: { items?: SerpItem[] }[] }[] };
-  const task = body.tasks?.[0];
-  // Out of credit (402 / 40200) or refused: say so, so it shows in the run's problems.
-  if (!res.ok || (task?.status_code ?? 20000) >= 40000) throw new Error(`DataForSEO ${res.status}: ${task?.status_message ?? res.statusText}`);
-  return task?.result?.[0]?.items ?? [];
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch("https://api.dataforseo.com/v3/serp/google/organic/live/regular", {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify([{ keyword, language_code: "en", location_code: locationCode, depth }]),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const body = (await res.json().catch(() => ({}))) as { tasks?: { status_code?: number; status_message?: string; result?: { items?: SerpItem[] }[] }[] };
+    const task = body.tasks?.[0];
+    const code = task?.status_code ?? (res.ok ? 20000 : res.status);
+    if ((code === 40101 || code === 40102) && attempt === 0) continue;
+    if (code === 40102) return [];
+    // Out of credit (402 / 40200) or refused: say so, so it shows in the run's problems.
+    if (!res.ok || code >= 40000) throw new Error(`DataForSEO ${res.status}: ${task?.status_message ?? res.statusText}`);
+    return task?.result?.[0]?.items ?? [];
+  }
 }
 
 /**
