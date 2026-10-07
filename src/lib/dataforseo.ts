@@ -80,3 +80,43 @@ export async function findWebsite(channelTitle: string, country: string | null):
   const u = new URL(hit.url);
   return `${u.protocol}//${u.host}/`;
 }
+
+export type TechSite = { domain: string; title: string; description: string; emails: string[] };
+
+/**
+ * Sites DataForSEO has seen running a technology (its Wappalyzer-style
+ * lookup), in one country, biggest first. HighLevel is "marketing.crm".
+ */
+export async function sitesUsing(
+  tech: { path: string; name: string },
+  country: string,
+  offset: number,
+  limit: number,
+): Promise<{ total: number; sites: TechSite[] }> {
+  if (!env.DATAFORSEO_LOGIN || !env.DATAFORSEO_PASSWORD) return { total: 0, sites: [] };
+  const auth = Buffer.from(`${env.DATAFORSEO_LOGIN}:${env.DATAFORSEO_PASSWORD}`).toString("base64");
+  const res = await fetch("https://api.dataforseo.com/v3/domain_analytics/technologies/domains_by_technology/live", {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+    body: JSON.stringify([
+      { technology_paths: [tech], filters: [["country_iso_code", "=", country]], order_by: ["domain_rank,desc"], offset, limit },
+    ]),
+    signal: AbortSignal.timeout(120_000),
+  });
+  type Item = { domain?: string; title?: string; description?: string; meta_keywords?: string[]; emails?: string[] };
+  const body = (await res.json().catch(() => ({}))) as { tasks?: { status_code?: number; status_message?: string; result?: { total_count?: number; items?: Item[] }[] }[] };
+  const task = body.tasks?.[0];
+  if (!res.ok || (task?.status_code ?? 0) >= 40000) throw new Error(`DataForSEO ${res.status}: ${task?.status_message ?? res.statusText}`);
+  const r = task?.result?.[0];
+  return {
+    total: r?.total_count ?? 0,
+    sites: (r?.items ?? [])
+      .filter((i) => i.domain)
+      .map((i) => ({
+        domain: i.domain!,
+        title: i.title ?? "",
+        description: [i.description ?? "", ...(i.meta_keywords ?? [])].join(" "),
+        emails: (i.emails ?? []).map((e) => e.split("?")[0]),
+      })),
+  };
+}

@@ -79,6 +79,10 @@ const schema = z.object({
   /** DataForSEO (Google search): TikTok discovery, and the website of creators who publish no links. */
   DATAFORSEO_LOGIN: optional,
   DATAFORSEO_PASSWORD: optional,
+  /** Agencies whose site runs HighLevel (DataForSEO's technology lookup): countries, in turn, separated by ",". */
+  HIGHLEVEL_COUNTRIES: z.string().default("GB"),
+  /** Sites looked at a day (about $0.0012 each); the agency-like ones become new agencies. */
+  HIGHLEVEL_DAILY: z.coerce.number().default(500),
   /** The Instantly campaign for creators (its own copy and results). */
   INSTANTLY_YT_CAMPAIGN_ID: optional,
   /** The Instantly campaign for creators (free white-label GBP Autopilot, 40% for life). */

@@ -37,6 +37,34 @@ export function agencyKey(website: string | null | undefined, email: string): st
   return emailType(email) === "work" && at ? at : `email:${email.trim().toLowerCase()}`;
 }
 
+/** A site's title and description read like a marketing agency's; the research model makes the real call. */
+export function looksLikeAgency(text: string): boolean {
+  const t = text.toLowerCase();
+  if (/\b(recruit\w*|estate agen\w*|letting agen\w*|lettings|travel agen\w*|care agency|home care|nursing|staffing|employment agency|model(l)?ing agency|talent agency|insurance|mortgage|solicitors?)\b/.test(t)) return false;
+  return /\b(marketing|agency|digital|seo|web ?design|website design|websites|ppc|lead gen\w*|advertising|branding|social media|funnels?)\b/.test(t);
+}
+
+/** Addresses nobody reads, or that belong to a team we should not cold-email. */
+const NOT_A_PERSON = /^(no-?reply|do-?not-?reply|privacy|dpo|gdpr|legal|abuse|postmaster|webmaster|careers|jobs|recruitment|accounts|invoices|billing|unsubscribe)@/;
+const SHARED = /^(info|hello|hi|contact|enquiries|enquiry|office|admin|team|mail|sales|support|studio)@/;
+
+/**
+ * The address to write to, from those an agency's own site publishes: a
+ * person at its domain, else a shared inbox at its domain. Another company's
+ * address is never taken, nor a free-mail one: that is usually a sole trader,
+ * whom UK PECR does not let us cold-email without consent.
+ */
+export function pickSiteEmail(emails: string[], domain: string): string | null {
+  const tidy = [...new Set(emails.map(tidyEmail).filter((e): e is string => !!e && !NOT_A_PERSON.test(e)))];
+  const own = tidy.filter((e) => {
+    const at = e.split("@")[1];
+    return at === domain || at.endsWith(`.${domain}`) || domain.endsWith(`.${at}`);
+  });
+  const person = own.find((e) => !SHARED.test(e));
+  if (person) return person;
+  return own[0] ?? null;
+}
+
 export function tidyEmail(email: string | null | undefined): string | null {
   const e = (email ?? "").trim().toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;

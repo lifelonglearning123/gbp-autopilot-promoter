@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { agencyKey, domainOf, emailType, tidyEmail } from "../src/lib/contact-rules";
+import { agencyKey, domainOf, emailType, looksLikeAgency, pickSiteEmail, tidyEmail } from "../src/lib/contact-rules";
 import { signedByPlatform } from "../src/lib/platform";
 import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
@@ -44,6 +44,23 @@ check("emails are tidied or refused", () => {
   assert.equal(tidyEmail("  Jo@Acme.IO "), "jo@acme.io");
   assert.equal(tidyEmail("nope"), null);
   assert.equal(tidyEmail(null), null);
+});
+
+check("a HighLevel site is kept when it reads like a marketing agency", () => {
+  assert.equal(looksLikeAgency("Norwich Digital Marketing Agency | Smash Marketing"), true);
+  assert.equal(looksLikeAgency("Web Design Croydon | Smart Cow"), true);
+  assert.equal(looksLikeAgency("Trusted Recruitment Agency UK"), false);
+  assert.equal(looksLikeAgency("Estate & Letting Agents in Bushey"), false);
+  assert.equal(looksLikeAgency("Wight Tyres - Leading Tyre Specialists"), false);
+  assert.equal(looksLikeAgency("Seoul food"), false, "a word inside another word does not count");
+});
+check("the address taken from an agency's site: a person, else a shared inbox, never another company's", () => {
+  assert.equal(pickSiteEmail(["info@acme.co.uk", "jo@acme.co.uk"], "acme.co.uk"), "jo@acme.co.uk");
+  assert.equal(pickSiteEmail(["hello@acme.co.uk", "noreply@acme.co.uk"], "acme.co.uk"), "hello@acme.co.uk");
+  assert.equal(pickSiteEmail(["jo@mail.acme.co.uk"], "acme.co.uk"), "jo@mail.acme.co.uk");
+  assert.equal(pickSiteEmail(["support@wix.com", "info@client-dentist.co.uk"], "acme.co.uk"), null);
+  assert.equal(pickSiteEmail(["acmeseo@gmail.com"], "acme.co.uk"), null, "free-mail is usually a sole trader (PECR)");
+  assert.equal(pickSiteEmail(["privacy@acme.co.uk"], "acme.co.uk"), null);
 });
 
 console.log("\nPlatform events");

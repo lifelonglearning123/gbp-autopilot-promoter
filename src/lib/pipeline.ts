@@ -12,6 +12,7 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
+import { contactsFromSites, discoverHighLevel } from "./highlevel";
 import { closeAnsweredTasks, discoverCreators, discoverTikTok, enrichCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
 import { draftPartners, handOverPartners } from "./partners";
@@ -307,6 +308,8 @@ export async function hourlyRun(budgetMs: number) {
       await step("write check-ins", () => writeDueCheckIns(log));
       await step("send notes", () => sendDueNotes(log));
       await step("intake", () => dailyIntake(log));
+      // Agencies whose own site runs HighLevel: found once a day, then researched like the GHL list.
+      await step("highlevel find", () => discoverHighLevel(log));
       // YouTube and TikTok creators: find, sort, collect details, hand over, write DMs, into GHL.
       await step("youtube details", () => enrichCreators(15, log));
       await step("youtube find", () => discoverCreators(log));
@@ -317,6 +320,7 @@ export async function hourlyRun(budgetMs: number) {
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
       await step("verify", () => verifySome(50, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
+      await step("site contacts", () => contactsFromSites(30, log));
       await step("draft", () => draftSome(20, deadline, log));
       await step("creator emails", () => draftPartners(5, log));
     }

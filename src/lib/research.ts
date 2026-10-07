@@ -19,6 +19,7 @@ import { askJson } from "./openrouter";
 export const FIT_FLOOR = 40;
 
 export type Facts = {
+  trading_name: string | null;
   is_agency: boolean;
   offers_local_seo: boolean;
   offers_gbp_management: boolean;
@@ -40,6 +41,7 @@ export type Facts = {
 const SYSTEM = `You research marketing agencies for GBP Autopilot, a white-label platform agencies resell to local businesses: it scores and improves each client's Google Business Profile, answers reviews, posts weekly and reports, all under the agency's own brand. Price: from £149 a month.
 
 From the agency's own web pages, return ONLY a JSON object with exactly these keys:
+trading_name (string|null: the agency's name as its own site writes it, e.g. "Smash Marketing" — not a page title or slogan),
 is_agency (bool: a marketing/web/SEO agency or freelancer selling to businesses),
 offers_local_seo (bool), offers_gbp_management (bool: Google Business Profile / Google Maps work),
 services (string[], short), niches (string[]: industries they serve, e.g. "dentists", "trades"),
@@ -104,9 +106,13 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
 
   const colour = crawl.themeColour ?? (/^#[0-9a-f]{6}$/i.test(facts.brand_colour_guess ?? "") ? facts.brand_colour_guess : null);
   const status = !facts.is_agency || fit < FIT_FLOOR ? "skipped" : "researched";
+  // Agencies found by their site (not from a list) start named after their domain; the brand goes on the sample audit.
+  const tradingName = (facts.trading_name ?? "").trim();
+  const rename = agency.name === agency.domain && tradingName.length >= 2 && tradingName.length <= 60;
   await db()
     .update(agencies)
     .set({
+      ...(rename ? { name: tradingName } : {}),
       fitScore: fit,
       branding: { logoUrl: crawl.logos[0] ?? null, colour },
       status,
