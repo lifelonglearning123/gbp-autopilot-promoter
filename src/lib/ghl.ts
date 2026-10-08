@@ -92,3 +92,63 @@ export async function verifyEmailGhl(email: string): Promise<"valid" | "risky" |
   }
   return foldGhlVerdict((await res.json()) as GhlVerdict);
 }
+
+/* ── Verification tags ──────────────────────────────────────────────────── */
+
+/**
+ * The owner's rule (2026-10-08): every address is checked with Instantly's
+ * verification before it is used, and its GHL contact carries the answer.
+ * Catch-all and invalid addresses are both "not verified".
+ */
+export const TAG_VERIFIED = "email verified";
+export const TAG_NOT_VERIFIED = "email not verified";
+
+export function verificationTag(status: string): string | null {
+  if (status === "valid") return TAG_VERIFIED;
+  if (status === "risky" || status === "invalid") return TAG_NOT_VERIFIED;
+  return null; // unverified or pending: no answer yet
+}
+
+async function ghl<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: headers(),
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { message?: string };
+  if (!res.ok) throw new Error(`GHL ${method} ${path.split("?")[0]} ${res.status}: ${data.message ?? ""}`);
+  return data;
+}
+
+/**
+ * The GHL contact for an address: found or added (GHL matches on email). Only
+ * the basics are sent, and no tags, so an existing contact's tags are never
+ * replaced.
+ */
+export async function upsertGhlContact(c: {
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  companyName?: string | null;
+  website?: string | null;
+}): Promise<string> {
+  const up = await ghl<{ contact?: { id?: string } }>("POST", "/contacts/upsert", {
+    locationId: env.ghl_location,
+    email: c.email,
+    ...(c.firstName ? { firstName: c.firstName } : {}),
+    ...(c.lastName ? { lastName: c.lastName } : {}),
+    ...(c.companyName ? { companyName: c.companyName } : {}),
+    ...(c.website ? { website: c.website } : {}),
+    source: "GBP Autopilot promoter",
+  });
+  if (!up.contact?.id) throw new Error("GHL upsert gave no contact id");
+  return up.contact.id;
+}
+
+/** Put the verification tag on a GHL contact and take the other one off. */
+export async function setVerificationTag(ghlContactId: string, tag: string) {
+  const other = tag === TAG_VERIFIED ? TAG_NOT_VERIFIED : TAG_VERIFIED;
+  await ghl("POST", `/contacts/${ghlContactId}/tags`, { tags: [tag] });
+  await ghl("DELETE", `/contacts/${ghlContactId}/tags`, { tags: [other] }).catch(() => {});
+}

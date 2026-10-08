@@ -8,7 +8,7 @@ import { signedByPlatform } from "../src/lib/platform";
 import { countryFromLocation, ghlTraces, internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
 import { AGENCY_PRICE, forMarket, marketOf } from "../src/lib/offer";
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
-import { foldGhlVerdict } from "../src/lib/ghl";
+import { foldGhlVerdict, TAG_NOT_VERIFIED, TAG_VERIFIED, verificationTag } from "../src/lib/ghl";
 import { actionLink, signatureOk } from "../src/lib/links";
 import { followUpProblems, templateFollowUps } from "../src/lib/draft-rules";
 import { emailsIn, instagramHandle, messageLink, phonesIn, sortLinks, tiktokHandle, tiktokProfile } from "../src/lib/creator-rules";
@@ -274,6 +274,17 @@ check("the tap-to-message link for each network", () => {
   assert.equal(instagramHandle("https://www.instagram.com/p/abc123/"), null);
   assert.equal(messageLink("instagram", "https://instagram.com/jo.local"), "https://ig.me/m/jo.local");
   assert.equal(messageLink("phone", "+44 7700 900123"), "tel:+447700900123");
+});
+
+check("GHL tag: verified is 'email verified'; catch-all and invalid are 'email not verified'; no answer, no tag", () => {
+  assert.equal(verificationTag("valid"), TAG_VERIFIED);
+  assert.equal(verificationTag("risky"), TAG_NOT_VERIFIED);
+  assert.equal(verificationTag("invalid"), TAG_NOT_VERIFIED);
+  assert.equal(verificationTag("pending"), null);
+  assert.equal(verificationTag("unverified"), null);
+  assert.equal(TAG_VERIFIED, "email verified");
+  assert.equal(TAG_NOT_VERIFIED, "email not verified");
+  assert.equal(foldVerdict({ verification_status: "verified", catch_all: true }), "risky", "catch-all is not verified");
 });
 
 console.log("\nMarkets");

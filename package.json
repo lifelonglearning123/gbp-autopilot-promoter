@@ -22,6 +22,7 @@
     "youtube:setup": "dotenv -e .env.local -- tsx scripts/youtube-setup.ts",
     "partners:setup": "dotenv -e .env.local -- tsx scripts/partners-setup.ts",
     "fix:countries": "dotenv -e .env.local -- tsx scripts/fix-countries.ts",
+    "recheck:emails": "dotenv -e .env.local -- tsx scripts/recheck-emails.ts",
     "us:setup": "dotenv -e .env.local -- tsx scripts/us-setup.ts",
     "send-test": "dotenv -e .env.local -- tsx scripts/send-test.ts",
     "import:history": "dotenv -e .env.local -- tsx scripts/import-instantly-history.ts",

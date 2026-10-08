@@ -1,7 +1,9 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { creators, outreachTasks } from "@/db/schema";
+import { contacts, creators, outreachTasks } from "@/db/schema";
 import { env } from "@/env";
+import { verificationTag } from "./ghl";
+import { verifyEmail, type Verified } from "./instantly";
 
 /**
  * YouTube creators into the owner's GoHighLevel, where the work happens: a
@@ -44,12 +46,29 @@ export async function syncCreatorsToGhl(limit: number, log: (l: string) => void)
   if (n) log(`youtube: ${n} creators added to GHL with their tasks`);
 }
 
+/**
+ * An address's verification answer: the one our contacts already have, else
+ * Instantly's (the owner's rule: nothing goes into GHL unchecked). Null while
+ * Instantly is still checking.
+ */
+async function checked(email: string): Promise<Exclude<Verified, "pending"> | null> {
+  const [known] = await db().select({ status: contacts.emailStatus }).from(contacts).where(eq(contacts.email, email.toLowerCase())).limit(1);
+  if (known && ["valid", "risky", "invalid"].includes(known.status)) return known.status as Exclude<Verified, "pending">;
+  if (known) return null; // the hourly check will get to it
+  const v = await verifyEmail(email);
+  return v === "pending" ? null : v;
+}
+
 /** GHL needs an email or phone; creators with neither stay in the dashboard's DM queue only. */
 async function syncOne(id: string): Promise<number> {
   const [c] = await db().select().from(creators).where(eq(creators.id, id)).limit(1);
   const tasks = await db().select().from(outreachTasks).where(eq(outreachTasks.creatorId, id));
   const email = c.emails[0]?.email;
   const phone = c.phones[0]?.phone;
+  // The email goes in only once it has been checked; until then the creator waits.
+  const verdict = email ? await checked(email) : null;
+  if (email && !verdict) return 0;
+  const tag = verdict ? verificationTag(verdict) : null;
   const up = await call<{ contact?: { id?: string } }>("POST", "/contacts/upsert", {
     locationId: env.ghl_location,
     name: c.title,
@@ -57,7 +76,7 @@ async function syncOne(id: string): Promise<number> {
     ...(email ? { email } : {}),
     ...(phone ? { phone } : {}),
     ...(c.links.website ? { website: c.links.website } : {}),
-    tags: ["youtube-creator", `yt-${c.kind ?? "unknown"}`, ...(c.usesGhl ? ["uses-ghl"] : [])],
+    tags: ["youtube-creator", `yt-${c.kind ?? "unknown"}`, ...(c.usesGhl ? ["uses-ghl"] : []), ...(tag ? [tag] : [])],
     source: "YouTube outreach (GBP Autopilot)",
   });
   const contactId = up.contact?.id;

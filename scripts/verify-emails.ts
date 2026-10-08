@@ -1,7 +1,8 @@
 /**
  * Verify contacts' email addresses.
- *   npm run verify:emails -- --limit 5            (GHL, paid from the location wallet)
- *   npm run verify:emails -- --limit 5 --instantly (Instantly credits)
+ *   npm run verify:emails -- --limit 5        (Instantly credits: the owner's rule since 2026-10-08)
+ *   npm run verify:emails -- --limit 5 --ghl  (GHL's check, paid from the location wallet; not the default)
+ * The hourly run does this too, and tags GHL; this script only records the answer.
  * Skips addresses already checked or marked invalid. Prints totals only.
  */
 import { asc, eq } from "drizzle-orm";
@@ -16,7 +17,7 @@ const arg = (name: string, fallback: number) => {
 };
 const limit = arg("--limit", 5);
 const parallel = Math.max(1, Math.min(5, arg("--parallel", 2)));
-const useInstantly = process.argv.includes("--instantly");
+const useInstantly = !process.argv.includes("--ghl");
 
 async function check(email: string): Promise<string> {
   if (!useInstantly) return verifyEmailGhl(email);

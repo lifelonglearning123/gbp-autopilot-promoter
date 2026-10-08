@@ -5,9 +5,9 @@ import { env } from "@/env";
 import { pauseAll, pausedState } from "./control";
 import { draftFirstEmail } from "./draft";
 import { draftFollowUps, followUpVars, syncFollowUps } from "./followups";
-import { verifyEmailGhl } from "./ghl";
+import { setVerificationTag, upsertGhlContact, verificationTag } from "./ghl";
 import { importGhl } from "./import-ghl";
-import { addLeads, blockList, bodyHtml } from "./instantly";
+import { addLeads, blockList, bodyHtml, verificationStatus, verifyEmail, type Verified } from "./instantly";
 import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
@@ -53,20 +53,91 @@ export async function dailyIntake(log: Log) {
     .onConflictDoUpdate({ target: controls.key, set: { value: { day: today, ...c }, updatedAt: new Date() } });
 }
 
+/**
+ * Every address is checked with Instantly's verification (the owner's rule,
+ * 2026-10-08, the same service as Outbound Console) before anything is drafted,
+ * sent or put in GHL. "pending" is asked again on a later run and held back
+ * until it has an answer. Each answer is kept as an email.checked event.
+ */
 export async function verifySome(limit: number, deadline: number, log: Log) {
-  const todo = await db()
-    .select({ id: contacts.id, email: contacts.email })
-    .from(contacts)
-    .where(eq(contacts.emailStatus, "unverified"))
-    .orderBy(asc(contacts.createdAt))
-    .limit(limit);
-  let n = 0;
+  // Only addresses we may still write to: a skipped or unreachable agency's wait, unchecked, until it comes back.
+  const todo = (await db().execute(sql`
+    select c.id, c.email, c.email_status from contacts c join agencies a on a.id = c.agency_id
+    where (c.email_status = 'unverified' or (c.email_status = 'pending' and c.updated_at < now() - interval '5 minutes'))
+      and a.status in ('new', 'researched', 'queued', 'needs_review', 'contacted', 'partner')
+    order by (c.email_status = 'pending'), c.created_at
+    limit ${limit}`)) as unknown as { id: string; email: string; email_status: string }[];
+  const tally: Record<string, number> = {};
+  let stopped: string | null = null;
   await pool(todo, 3, deadline, async (c) => {
-    const v = await verifyEmailGhl(c.email);
+    if (stopped) return;
+    let v: Verified;
+    try {
+      v = c.email_status === "pending" ? await verificationStatus(c.email) : await verifyEmail(c.email);
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      // No credits or a refused key will not fix itself this run: stop and say so.
+      if (/ 40[123]\b|credit/i.test(why)) stopped = why;
+      tally.error = (tally.error ?? 0) + 1;
+      return;
+    }
     await db().update(contacts).set({ emailStatus: v, updatedAt: new Date() }).where(eq(contacts.id, c.id));
-    n++;
+    if (v !== "pending") await db().insert(events).values({ source: "bot", type: "email.checked", contactId: c.id, payload: { by: "instantly", verdict: v } });
+    tally[v] = (tally[v] ?? 0) + 1;
   });
-  if (todo.length) log(`verified ${n} of ${todo.length} new addresses`);
+  if (todo.length) log(`email check (Instantly): ${JSON.stringify(tally)}`);
+  if (stopped) log(`email check stopped: ${stopped}`);
+}
+
+/** The answer on each checked address's GHL contact: added to GHL first if it is not there yet. */
+export async function tagSome(limit: number, deadline: number, log: Log) {
+  const todo = (await db().execute(sql`
+    select c.id, c.email, c.first_name, c.last_name, c.ghl_contact_id, a.name agency, a.website, e.payload->>'verdict' verdict
+    from contacts c
+    join agencies a on a.id = c.agency_id
+    join lateral (select payload, at from events where contact_id = c.id and type = 'email.checked' order by at desc limit 1) e on true
+    where not exists (select 1 from events t where t.contact_id = c.id and t.type = 'email.tagged' and t.at >= e.at)
+    limit ${limit}`)) as unknown as {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+    ghl_contact_id: string | null;
+    agency: string;
+    website: string | null;
+    verdict: string;
+  }[];
+  const tally: Record<string, number> = {};
+  await pool(todo, 2, deadline, async (c) => {
+    const tag = verificationTag(c.verdict);
+    if (!tag) return;
+    try {
+      let ghlId = c.ghl_contact_id;
+      if (!ghlId) {
+        ghlId = await upsertGhlContact({
+          email: c.email,
+          firstName: c.first_name,
+          lastName: c.last_name,
+          companyName: c.agency.startsWith("email:") ? null : c.agency,
+          website: c.website,
+        });
+        // Two of our contacts can be one GHL contact (GHL also matches on phone): keep the first link.
+        await db().update(contacts).set({ ghlContactId: ghlId, updatedAt: new Date() }).where(eq(contacts.id, c.id)).catch(() => {});
+        tally.added_to_ghl = (tally.added_to_ghl ?? 0) + 1;
+      }
+      await setVerificationTag(ghlId, tag);
+      await db().insert(events).values({ source: "bot", type: "email.tagged", contactId: c.id, payload: { tag, ghlContactId: ghlId } });
+      tally[tag] = (tally[tag] ?? 0) + 1;
+    } catch (e) {
+      tally.failed = (tally.failed ?? 0) + 1;
+      if (!tally.failed_logged) {
+        tally.failed_logged = 1;
+        log(`GHL tag failed (${c.email.replace(/^(.).*@/, "$1…@")}): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+  });
+  delete tally.failed_logged;
+  if (todo.length) log(`GHL verification tags: ${JSON.stringify(tally)}`);
 }
 
 export async function researchSome(limit: number, deadline: number, log: Log) {
@@ -339,6 +410,7 @@ export async function hourlyRun(budgetMs: number) {
       await step("youtube DMs", () => queueTasks(10, log));
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
       await step("verify", () => verifySome(50, deadline, log));
+      await step("GHL tags", () => tagSome(40, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
       await step("site contacts", () => contactsFromSites(30, log));
       await step("draft", () => draftSome(20, deadline, log));

@@ -86,7 +86,7 @@ export async function contactsFromSites(limit: number, log: Log) {
   const todo = (await db().execute(sql`
     select a.id, a.domain, a.country from agencies a
     where a.status = 'researched'
-      and not exists (select 1 from contacts c where c.agency_id = a.id and c.email_status in ('valid', 'unverified'))
+      and not exists (select 1 from contacts c where c.agency_id = a.id and c.email_status in ('valid', 'unverified', 'pending'))
     order by a.fit_score desc nulls last
     limit ${limit}`)) as unknown as { id: string; domain: string; country: string | null }[];
   let added = 0;
