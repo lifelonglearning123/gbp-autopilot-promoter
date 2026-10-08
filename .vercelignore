@@ -1,0 +1,5 @@
+.env*
+*.log
+drafts
+node_modules
+.next
