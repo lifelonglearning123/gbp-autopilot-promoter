@@ -285,7 +285,8 @@ UK English. No hype, no flattery, no placeholders, no terms beyond the facts giv
  * a call script if they publish a phone. Due 3 days after their first email
  * (so the email lands first), or now if there is no email to send.
  */
-export async function queueTasks(limit: number, log: Log) {
+/** Each creator is a model call (~a minute with Kimi): three at a time, and none started once the run is short of time. */
+export async function queueTasks(limit: number, log: Log, deadline = Infinity) {
   const ids = (await db().execute(sql`
     select cr.id from creators cr
     where cr.status in ('in_pipeline', 'no_email', 'partner_pipeline', 'partner_no_email')
@@ -294,7 +295,8 @@ export async function queueTasks(limit: number, log: Log) {
     limit ${limit}`)) as unknown as { id: string }[];
   const todo = ids.length ? await db().select().from(creators).where(inArray(creators.id, ids.map((r) => r.id))) : [];
   let n = 0;
-  for (const c of todo) {
+  const queue = [...todo];
+  const one = async (c: (typeof todo)[number]) => {
     const recent = c.recentVideos.slice(0, 4).map((v) => `- ${v.title}`).join("\n");
     const { data } = await askJson<{ instagram: string; skool: string; phone_script: string }>({
       model: env.WRITER_MODELS.split(",")[0].trim(),
@@ -306,7 +308,7 @@ Recent videos:
 ${recent}`,
       maxTokens: 800,
     }).catch(() => ({ data: null }));
-    if (!data) continue;
+    if (!data) return;
 
     let due = new Date();
     if (c.agencyId) {
@@ -324,7 +326,12 @@ ${recent}`,
     if (phones[0]) rows.push({ creatorId: c.id, channel: "phone", target: phones[0].phone, message: data.phone_script, dueAt: new Date(due.getTime() + 2 * 86_400_000) });
     if (rows.length) await db().insert(outreachTasks).values(rows);
     n++;
-  }
+  };
+  await Promise.all(
+    Array.from({ length: 3 }, async () => {
+      for (let c = queue.shift(); c && deadline - Date.now() > 120_000; c = queue.shift()) await one(c).catch(() => {});
+    }),
+  );
   if (n) log(`youtube: DM / call messages written for ${n} creators`);
 }
 

@@ -410,11 +410,12 @@ export async function hourlyRun(budgetMs: number) {
       await step("tiktok find", () => discoverTikTok(log));
       await step("youtube qualify", () => qualifyCreators(20, log));
       await step("youtube hand over", () => handOverPartners(30, log));
-      await step("youtube DMs", () => queueTasks(10, log));
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
       await step("research", () => researchSome(30, deadline, log));
       await step("site contacts", () => contactsFromSites(30, log));
       await step("draft", () => draftSome(20, deadline, log));
+      // Creator DMs after the agency drafts: the agency emails always come first.
+      await step("youtube DMs", () => queueTasks(10, log, deadline));
       await step("creator emails", () => draftPartners(5, log, deadline));
     }
   }
