@@ -65,7 +65,7 @@ export async function verifySome(limit: number, deadline: number, log: Log) {
     select c.id, c.email, c.email_status from contacts c join agencies a on a.id = c.agency_id
     where (c.email_status = 'unverified' or (c.email_status = 'pending' and c.updated_at < now() - interval '5 minutes'))
       and a.status in ('new', 'researched', 'queued', 'needs_review', 'contacted', 'partner')
-    order by (c.email_status = 'pending'), c.created_at
+    order by (c.email_status = 'pending') desc, c.created_at -- asking again about a pending one costs no credit: those first
     limit ${limit}`)) as unknown as { id: string; email: string; email_status: string }[];
   const tally: Record<string, number> = {};
   let stopped: string | null = null;
