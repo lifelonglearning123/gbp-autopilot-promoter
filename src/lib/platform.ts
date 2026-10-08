@@ -71,7 +71,7 @@ export function shortClaimUrl(sample: { claimUrl: string | null; platformToken: 
   return sample.claimUrl ? `${env.PLATFORM_URL.replace(/\/$/, "")}/c/${sample.platformToken}` : null;
 }
 
-/** A pre-filled signup link on its own (30 days). */
+/** A pre-filled signup link on its own (30 days), and its short /c/<token> form to put in an email. */
 export function claimLink(req: {
   agencyName: string;
   email: string;
@@ -80,7 +80,7 @@ export function claimLink(req: {
   colour?: string | null;
   externalRef?: string;
   offer?: "creator";
-}): Promise<{ claimUrl: string }> {
+}): Promise<{ claimUrl: string; shortUrl?: string }> {
   return call("/api/bot/claim-link", req);
 }
 

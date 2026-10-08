@@ -189,7 +189,8 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
     previewUrl = sample.previewUrl;
   } else {
     sample = null;
-    ({ claimUrl } = await claimLink({ agencyName: c.title, email: contact.email, logoUrl: brand.logoUrl, colour: brand.colour, externalRef: contact.id, offer: "creator" }));
+    const link = await claimLink({ agencyName: c.title, email: contact.email, logoUrl: brand.logoUrl, colour: brand.colour, externalRef: contact.id, offer: "creator" });
+    claimUrl = link.shortUrl ?? link.claimUrl; // the long signed link only if the platform gave no short one
   }
 
   const writer = contact.writerModel ?? writerFor(contact.id);
