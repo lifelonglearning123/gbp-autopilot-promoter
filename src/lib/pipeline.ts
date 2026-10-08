@@ -401,6 +401,9 @@ export async function hourlyRun(budgetMs: number) {
       await step("intake", () => dailyIntake(log));
       // Agencies whose own site runs HighLevel: found once a day, then researched like the GHL list.
       await step("highlevel find", () => discoverHighLevel(log));
+      // Every address is checked before anything uses it, so this goes before the long creator steps.
+      await step("verify", () => verifySome(50, deadline, log));
+      await step("GHL tags", () => tagSome(40, deadline, log));
       // YouTube and TikTok creators: find, sort, collect details, hand over, write DMs, into GHL.
       await step("youtube details", () => enrichCreators(15, log));
       await step("youtube find", () => discoverCreators(log));
@@ -409,8 +412,6 @@ export async function hourlyRun(budgetMs: number) {
       await step("youtube hand over", () => handOverPartners(30, log));
       await step("youtube DMs", () => queueTasks(10, log));
       await step("youtube to GHL", () => syncCreatorsToGhl(20, log));
-      await step("verify", () => verifySome(50, deadline, log));
-      await step("GHL tags", () => tagSome(40, deadline, log));
       await step("research", () => researchSome(30, deadline, log));
       await step("site contacts", () => contactsFromSites(30, log));
       await step("draft", () => draftSome(20, deadline, log));
