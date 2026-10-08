@@ -113,7 +113,8 @@ ${PARTNER_FACTS}
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
 ok is false if the first email does not make the offer plain (their own white-label GBP Autopilot in their brand, at no cost, 40% of what the businesses pay, for life); any email states terms or facts not given (payout schedule, bonuses, results), misreads the audit, misdescribes their channel, is pushy, guilt-tripping, flattering or hype-y, reads as a template, or would embarrass the sender. notes: short, specific fixes (empty when ok).`;
 
-export async function draftPartners(limit: number, log: Log) {
+/** Each creator can take minutes (a sample audit, writing, checking): stops while the run still has time to finish. */
+export async function draftPartners(limit: number, log: Log, deadline = Infinity) {
   const todo = (await db().execute(sql`
     select c.id from contacts c join agencies a on a.id = c.agency_id
     where c.source like 'partner:%' and c.email_status = 'valid' and a.status = 'partner'
@@ -122,6 +123,7 @@ export async function draftPartners(limit: number, log: Log) {
     limit ${limit}`)) as unknown as { id: string }[];
   const tally: Record<string, number> = {};
   for (const { id } of todo) {
+    if (deadline - Date.now() < 240_000) break;
     const r = await draftPartner(id).catch((e: unknown) => ({ why: e instanceof Error ? e.message : String(e) }));
     const k = "why" in r ? `failed (${r.why.slice(0, 80)})` : r.passed ? "queued" : "needs_review";
     tally[k] = (tally[k] ?? 0) + 1;

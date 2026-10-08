@@ -282,12 +282,25 @@ export async function hourlyRun(budgetMs: number) {
   const deadline = Date.now() + budgetMs;
   const lines: string[] = [];
   const log: Log = (l) => lines.push(l);
+  // Seconds per step, and steps left out for lack of time. Saved after every
+  // step, so a run the server cuts off still shows how far it got.
+  const seconds: Record<string, number> = {};
+  const skipped: string[] = [];
+  const [run] = await db().insert(events).values({ source: "bot", type: "run", payload: { lines } }).returning({ id: events.id });
+  const save = () => db().update(events).set({ payload: { lines, seconds, skipped } }).where(eq(events.id, run.id));
   const step = async (name: string, fn: () => Promise<unknown>) => {
+    if (left(deadline) < 60_000) {
+      skipped.push(name);
+      return;
+    }
+    const started = Date.now();
     try {
       await fn();
     } catch (e) {
       log(`${name} failed: ${e instanceof Error ? e.message : e}`);
     }
+    seconds[name] = Math.round((Date.now() - started) / 1000);
+    await save().catch(() => {});
   };
 
   await step("replies", () => handleReplies(log));
@@ -322,10 +335,11 @@ export async function hourlyRun(budgetMs: number) {
       await step("research", () => researchSome(30, deadline, log));
       await step("site contacts", () => contactsFromSites(30, log));
       await step("draft", () => draftSome(20, deadline, log));
-      await step("creator emails", () => draftPartners(5, log));
+      await step("creator emails", () => draftPartners(5, log, deadline));
     }
   }
-  await db().insert(events).values({ source: "bot", type: "run", payload: { lines } });
+  if (skipped.length) log(`out of time, left for next run: ${skipped.join(", ")}`);
+  await save();
   return lines;
 }
 
