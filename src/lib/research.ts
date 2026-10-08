@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import { agencies, agencyResearch, contacts } from "@/db/schema";
 import { env } from "@/env";
 import { crawlSite } from "./crawl";
+import { countryFromLocation } from "./crawl-rules";
 import { askJson } from "./openrouter";
 
 /**
@@ -84,6 +85,8 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
     user: `Agency: ${agency.name}\nWebsite: ${site}\n\n${pagesForModel}`,
     maxTokens: 1500,
   });
+  // The page code shows GoHighLevel even where the text never names it.
+  if (crawl.ghl.some((g) => g.trace !== "mentions HighLevel")) facts.uses_gohighlevel = true;
   const fit = Math.max(0, Math.min(100, Math.round(Number(facts.fit_score) || 0)));
 
   const [{ next }] = await db()
@@ -96,7 +99,7 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
     version: next,
     pagesCrawled: crawl.pages.map((p) => p.url),
     rawText: crawl.pages.map((p) => `### ${p.url}\n${p.text}`).join("\n\n"),
-    signals: { logos: crawl.logos, themeColour: crawl.themeColour, emails: crawl.emails },
+    signals: { logos: crawl.logos, themeColour: crawl.themeColour, emails: crawl.emails, ghl: crawl.ghl },
     facts: facts as unknown as Record<string, unknown>,
     summary: facts.summary ?? null,
     fitScore: fit,
@@ -109,10 +112,13 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
   // Agencies found by their site (not from a list) start named after their domain; the brand goes on the sample audit.
   const tradingName = (facts.trading_name ?? "").trim();
   const rename = agency.name === agency.domain && tradingName.length >= 2 && tradingName.length <= 60;
+  // Where the site says it is beats the list it came from (the GHL list called everyone GB).
+  const country = countryFromLocation(facts.location);
   await db()
     .update(agencies)
     .set({
       ...(rename ? { name: tradingName } : {}),
+      ...(country ? { country } : {}),
       fitScore: fit,
       branding: { logoUrl: crawl.logos[0] ?? null, colour },
       status,

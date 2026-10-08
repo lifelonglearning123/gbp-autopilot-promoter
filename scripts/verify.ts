@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { agencyKey, domainOf, emailType, looksLikeAgency, pickSiteEmail, tidyEmail } from "../src/lib/contact-rules";
 import { signedByPlatform } from "../src/lib/platform";
-import { internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
+import { countryFromLocation, ghlTraces, internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
+import { AGENCY_PRICE, forMarket, marketOf } from "../src/lib/offer";
 import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict } from "../src/lib/ghl";
 import { actionLink, signatureOk } from "../src/lib/links";
@@ -273,6 +274,36 @@ check("the tap-to-message link for each network", () => {
   assert.equal(instagramHandle("https://www.instagram.com/p/abc123/"), null);
   assert.equal(messageLink("instagram", "https://instagram.com/jo.local"), "https://ig.me/m/jo.local");
   assert.equal(messageLink("phone", "+44 7700 900123"), "tel:+447700900123");
+});
+
+console.log("\nMarkets");
+check("GoHighLevel is seen in page code: its widgets, link domain and booking pages", () => {
+  assert.deepEqual(ghlTraces('<script src="https://widgets.leadconnectorhq.com/loader.js"></script>'), ["LeadConnector widget or form"]);
+  assert.deepEqual(ghlTraces('<a href="https://visible.ghostengine.digital/widget/booking/abc">Book</a>'), ["GoHighLevel booking or form page"]);
+  assert.deepEqual(ghlTraces('<a href="https://link.msgsndr.com/x">'), ["GoHighLevel link domain (msgsndr)"]);
+  assert.deepEqual(ghlTraces("<p>We build websites</p>"), []);
+});
+check("an agency's country comes from where its site says it is", () => {
+  assert.equal(countryFromLocation("Ocala, FL, USA"), "US");
+  assert.equal(countryFromLocation("Inland Empire, California, USA"), "US");
+  assert.equal(countryFromLocation("West Palm Beach, Florida"), "US");
+  assert.equal(countryFromLocation("Austin, TX"), "US");
+  assert.equal(countryFromLocation("Norwich, UK"), "GB");
+  assert.equal(countryFromLocation("Leeds, England"), "GB");
+  assert.equal(countryFromLocation("Toronto, ON, Canada"), "CA");
+  assert.equal(countryFromLocation("Dublin, Ireland"), "IE");
+  assert.equal(countryFromLocation(null), null);
+  assert.equal(countryFromLocation("Remote"), null);
+});
+check("US agencies get $199 a month and US English; everyone else £149 and UK English", () => {
+  assert.equal(marketOf("US"), "US");
+  assert.equal(marketOf("GB"), "UK");
+  assert.equal(marketOf(null), "UK");
+  assert.equal(forMarket("From £149 a month. Plain text, UK English.", "US"), "From $199 a month. Plain text, US English.");
+  assert.equal(forMarket("From £149 a month.", "UK"), "From £149 a month.");
+  const t = templateFollowUps({ firstName: "Jo", finding: null, previewUrl: "https://gbp.macaws.ai/preview/x", claimUrl: null, price: AGENCY_PRICE.US });
+  assert.match(t.body_3, /From \$199 a month/);
+  assert.doesNotMatch(t.body_3, /£/);
 });
 
 console.log("\nOwner's links");

@@ -1,4 +1,4 @@
-import { internalLinks, logoCandidates, pageText, pageTitle, pickPages, publishedEmails, themeColour } from "./crawl-rules";
+import { ghlTraces, internalLinks, logoCandidates, pageText, pageTitle, pickPages, publishedEmails, themeColour } from "./crawl-rules";
 
 /**
  * Read an agency's site: the homepage and up to five pages that say what it
@@ -12,13 +12,15 @@ export type Crawl = {
   logos: string[];
   themeColour: string | null;
   emails: { email: string; url: string }[];
+  /** GoHighLevel seen in the pages' code, and where. */
+  ghl: { trace: string; url: string }[];
 };
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 const MAX_BYTES = 1_500_000;
 
-async function get(url: string): Promise<{ url: string; html: string } | null> {
+export async function get(url: string): Promise<{ url: string; html: string } | null> {
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml", "Accept-Language": "en-GB,en;q=0.8" },
@@ -40,12 +42,14 @@ export async function crawlSite(website: string): Promise<Crawl | null> {
 
   const pages: CrawledPage[] = [{ url: home.url, title: pageTitle(home.html), text: pageText(home.html) }];
   const emails = publishedEmails(home.html).map((email) => ({ email, url: home.url }));
+  const ghl = ghlTraces(home.html).map((trace) => ({ trace, url: home.url }));
 
   for (const url of pickPages(internalLinks(home.html, home.url))) {
     const page = await get(url);
     if (!page) continue;
     pages.push({ url: page.url, title: pageTitle(page.html), text: pageText(page.html, 6000) });
     for (const email of publishedEmails(page.html)) emails.push({ email, url: page.url });
+    for (const trace of ghlTraces(page.html)) if (!ghl.some((g) => g.trace === trace)) ghl.push({ trace, url: page.url });
   }
 
   return {
@@ -53,5 +57,6 @@ export async function crawlSite(website: string): Promise<Crawl | null> {
     logos: logoCandidates(home.html, home.url),
     themeColour: themeColour(home.html),
     emails,
+    ghl,
   };
 }

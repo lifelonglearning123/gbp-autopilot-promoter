@@ -128,18 +128,29 @@ export async function setCampaignAccounts(campaignId: string, accounts: string[]
  * One campaign for first emails. Each lead carries its own written email as
  * custom variables, so the sequence is just {{subject}} and {{body_html}}.
  * Created as a draft: nothing is sent until it is activated in Instantly.
- * Weekdays 9-5 UK time (Instantly has no Europe/London; Isle of Man keeps UK time).
+ * Weekdays 9-5 UK time (Instantly has no Europe/London; Isle of Man keeps UK
+ * time), or US Eastern (Instantly has no America/New_York; Detroit keeps it).
  */
-export async function createFirstEmailCampaign(name: string, accounts: string[], dailyLimit = 50): Promise<{ id: string; status: number }> {
+export const SENDING_WINDOW = {
+  UK: { name: "UK weekdays", timezone: "Europe/Isle_of_Man" },
+  US: { name: "US Eastern weekdays", timezone: "America/Detroit" },
+} as const;
+
+export async function createFirstEmailCampaign(
+  name: string,
+  accounts: string[],
+  dailyLimit = 50,
+  window: keyof typeof SENDING_WINDOW = "UK",
+): Promise<{ id: string; status: number }> {
   return api("POST", "/campaigns", {
     name,
     campaign_schedule: {
       schedules: [
         {
-          name: "UK weekdays",
+          name: SENDING_WINDOW[window].name,
           timing: { from: "09:00", to: "17:00" },
           days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
-          timezone: "Europe/Isle_of_Man",
+          timezone: SENDING_WINDOW[window].timezone,
         },
       ],
     },

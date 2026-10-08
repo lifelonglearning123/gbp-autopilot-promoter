@@ -23,14 +23,18 @@ async function setPaused(value: Paused) {
     .onConflictDoUpdate({ target: controls.key, set: { value, updatedAt: new Date() } });
 }
 
+/** The agency campaigns the owner's switch covers. Creator campaigns stay as set in Instantly (activated by hand). */
 async function campaign(action: "pause" | "activate") {
-  if (!env.INSTANTLY_CAMPAIGN_ID || !env.INSTANTLY_API_KEY) return;
-  const res = await fetch(`https://api.instantly.ai/api/v2/campaigns/${env.INSTANTLY_CAMPAIGN_ID}/${action}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.INSTANTLY_API_KEY}` },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`Instantly would not ${action} the campaign (${res.status}).`);
+  if (!env.INSTANTLY_API_KEY) return;
+  for (const id of [env.INSTANTLY_CAMPAIGN_ID, env.INSTANTLY_US_CAMPAIGN_ID]) {
+    if (!id) continue;
+    const res = await fetch(`https://api.instantly.ai/api/v2/campaigns/${id}/${action}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.INSTANTLY_API_KEY}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Instantly would not ${action} campaign ${id} (${res.status}).`);
+  }
 }
 
 /** Stop sending now. Our switch is set first, so nothing is pushed even if Instantly fails. */

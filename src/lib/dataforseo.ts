@@ -81,6 +81,14 @@ export async function findWebsite(channelTitle: string, country: string | null):
   return `${u.protocol}//${u.host}/`;
 }
 
+/** Google's organic results for a phrase in a country: what anyone searching would see. */
+export async function searchGoogle(keyword: string, country: string | null, depth = 10): Promise<{ url: string; title: string; snippet: string }[]> {
+  const items = await google(keyword, LOCATION[(country ?? "").toUpperCase()] ?? 2840, depth);
+  return items
+    .filter((i) => i.type === "organic" && i.url)
+    .map((i) => ({ url: i.url!, title: i.title ?? "", snippet: i.description ?? "" }));
+}
+
 export type TechSite = { domain: string; title: string; description: string; emails: string[] };
 
 /**

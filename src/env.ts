@@ -83,6 +83,8 @@ const schema = z.object({
   HIGHLEVEL_COUNTRIES: z.string().default("GB"),
   /** Sites looked at a day (about $0.0012 each); the agency-like ones become new agencies. */
   HIGHLEVEL_DAILY: z.coerce.number().default(500),
+  /** The Instantly campaign for US agencies ($199 a month, 9-5 US Eastern): npm run us:setup. */
+  INSTANTLY_US_CAMPAIGN_ID: optional,
   /** The Instantly campaign for creators (its own copy and results). */
   INSTANTLY_YT_CAMPAIGN_ID: optional,
   /** The Instantly campaign for creators (free white-label GBP Autopilot, 40% for life). */

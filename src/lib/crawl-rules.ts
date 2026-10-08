@@ -128,3 +128,42 @@ export function publishedEmails(html: string): string[] {
   }
   return [...out].slice(0, 20);
 }
+
+/**
+ * What in a page's code shows it runs on GoHighLevel: its chat widget, form
+ * and booking embeds (LeadConnector), its link and file domains, or a branded
+ * booking page (/widget/booking/). Page text alone misses these.
+ */
+const GHL_TRACES: [RegExp, string][] = [
+  [/leadconnectorhq\.com/i, "LeadConnector widget or form"],
+  [/msgsndr\.com/i, "GoHighLevel link domain (msgsndr)"],
+  [/filesafe\.space/i, "GoHighLevel file storage"],
+  [/\/widget\/(booking|form|survey)\//i, "GoHighLevel booking or form page"],
+  [/gohighlevel\.com|\bhighlevel\b/i, "mentions HighLevel"],
+];
+
+export function ghlTraces(html: string): string[] {
+  return GHL_TRACES.filter(([re]) => re.test(html)).map(([, what]) => what);
+}
+
+/** ISO country code from where research says an agency is: "Ocala, FL, USA" → "US". Null when it does not say. */
+const US_STATES =
+  /,\s*(AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/;
+const COUNTRIES: [RegExp, string][] = [
+  [/\b(usa|u\.s\.a?\.?|united states)\b/i, "US"],
+  [/\b(uk|u\.k\.|united kingdom|great britain|england|scotland|wales|northern ireland)\b/i, "GB"],
+  [/\b(ireland|éire)\b/i, "IE"],
+  [/\bcanada\b/i, "CA"],
+  [/\baustralia\b/i, "AU"],
+  [/\bnew zealand\b/i, "NZ"],
+  [/\bindia\b/i, "IN"],
+];
+const US_STATE_NAMES = /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\b/i;
+
+export function countryFromLocation(location: string | null | undefined): string | null {
+  const loc = (location ?? "").trim();
+  if (!loc) return null;
+  for (const [re, code] of COUNTRIES) if (re.test(loc)) return code;
+  if (US_STATES.test(loc) || US_STATE_NAMES.test(loc)) return "US";
+  return null;
+}

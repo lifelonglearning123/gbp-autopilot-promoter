@@ -16,7 +16,7 @@ import { contactsFromSites, discoverHighLevel } from "./highlevel";
 import { closeAnsweredTasks, discoverCreators, discoverTikTok, enrichCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
 import { draftPartners, handOverPartners } from "./partners";
-import { draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
+import { draftSecondWarmNotes, draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
 
 /**
  * The work the hourly run does, each step bounded so a run fits its time.
@@ -116,15 +116,20 @@ export async function backfillFollowUps(limit: number, deadline: number, log: Lo
 
 /* ── Push: drafts whose hold has passed ─────────────────────────────────── */
 
-type Track = "main" | "youtube" | "partner";
-const TRACK_NAME: Record<Track, string> = { main: "main", youtube: "YouTube creators'", partner: "creator partners'" };
+type Track = "main" | "us" | "youtube" | "partner";
+const TRACK_NAME: Record<Track, string> = { main: "main", us: "US agencies'", youtube: "YouTube creators'", partner: "creator partners'" };
 
-/** Push due emails: the GHL list to the main campaign, creators (the creator offer) to theirs; the YouTube campaign keeps its earlier leads. */
+/**
+ * Push due emails: agencies to the main campaign, US agencies ($199, US hours)
+ * to theirs, creators (the creator offer) to theirs; the YouTube campaign keeps
+ * its earlier leads. A US agency waits until the US campaign exists.
+ */
 export async function pushDue(limit: number, log: Log): Promise<number> {
   const main = await pushInto(env.INSTANTLY_CAMPAIGN_ID, "main", limit, log);
+  const us = await pushInto(env.INSTANTLY_US_CAMPAIGN_ID, "us", limit, log);
   const yt = await pushInto(env.INSTANTLY_YT_CAMPAIGN_ID, "youtube", limit, log);
   const partners = await pushInto(env.INSTANTLY_PARTNER_CAMPAIGN_ID, "partner", limit, log);
-  return main + yt + partners;
+  return main + us + yt + partners;
 }
 
 async function pushInto(campaignId: string | undefined, track: Track, limit: number, log: Log): Promise<number> {
@@ -138,7 +143,8 @@ async function pushInto(campaignId: string | undefined, track: Track, limit: num
       and (m.guardrail->>'ok')::boolean
       and (m.hold_until is null or m.hold_until <= now())
       and c.email_status = 'valid' and a.status = 'queued'
-      and (case when c.source like 'youtube:%' then 'youtube' when c.source like 'partner:%' then 'partner' else 'main' end) = ${track}
+      and (case when c.source like 'youtube:%' then 'youtube' when c.source like 'partner:%' then 'partner'
+                when a.country = 'US' then 'us' else 'main' end) = ${track}
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     order by m.created_at
     limit ${limit}`)) as unknown as {
@@ -318,6 +324,7 @@ export async function hourlyRun(budgetMs: number) {
       await step("follow-ups", () => backfillFollowUps(5, deadline, log));
       await step("sync follow-ups", () => syncFollowUps(200, log));
       await step("warm notes", () => draftWarmNotes(log));
+      await step("second warm notes", () => draftSecondWarmNotes(log));
       await step("write check-ins", () => writeDueCheckIns(log));
       await step("send notes", () => sendDueNotes(log));
       await step("intake", () => dailyIntake(log));
@@ -348,9 +355,9 @@ export async function hourlyRun(budgetMs: number) {
 export async function waitingDrafts() {
   return (await db().execute(sql`
     select m.id, m.hold_until, a.name agency, a.fit_score,
-           case m.step when 1 then m.subject when 10 then 'warm note (opened the audit)' when 20 then 'check-in ("not now" earlier)' end subject
+           case m.step when 1 then m.subject when 10 then 'warm note (opened the audit)' when 11 then 'second warm note (no reply since)' when 20 then 'check-in ("not now" earlier)' end subject
     from messages m join contacts c on c.id = m.contact_id join agencies a on a.id = c.agency_id
-    where m.step in (1, 10, 20) and m.pushed_at is null and m.sent_at is null and m.stopped_at is null
+    where m.step in (1, 10, 11, 20) and m.pushed_at is null and m.sent_at is null and m.stopped_at is null
       and (m.guardrail->>'ok')::boolean
     order by m.hold_until nulls first`)) as unknown as { id: string; subject: string; hold_until: string | null; agency: string; fit_score: number | null }[];
 }

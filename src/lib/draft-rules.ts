@@ -97,11 +97,11 @@ export function followUpProblems(f: FollowUps, previewUrl: string, claimUrl: str
 }
 
 /** Safe follow-ups from facts alone, for when the writer's fail the check twice. */
-export function templateFollowUps(o: { firstName: string | null; finding: string | null; previewUrl: string; claimUrl: string | null }): FollowUps {
+export function templateFollowUps(o: { firstName: string | null; finding: string | null; previewUrl: string; claimUrl: string | null; price?: string }): FollowUps {
   const hi = o.firstName?.trim() ? `Hi ${o.firstName.trim()},` : "Hi there,";
   return {
     body_2: `${hi}\n\nOne more thing from the audit${o.finding ? `: ${o.finding.replace(/\.$/, "")}.` : "."} It's the kind of fix your clients would see in the first month.\n\n${o.previewUrl}\n\nWorth a look?`,
-    body_3: `${hi}\n\nHow it works: you sell Google Business Profile management to your local clients under your own brand, and we do the work behind it: audits, fixes, review replies, weekly posts and reports. It works with the GoHighLevel you already use, so each audit lands in your sub-account with the findings and the tasks. From £149 a month, and your first three client audits are free.\n\nYou can claim your account here:\n${o.claimUrl ?? o.previewUrl}\n\nWould that fit what you offer?`,
+    body_3: `${hi}\n\nHow it works: you sell Google Business Profile management to your local clients under your own brand, and we do the work behind it: audits, fixes, review replies, weekly posts and reports. It works with the GoHighLevel you already use, so each audit lands in your sub-account with the findings and the tasks. From ${o.price ?? "£149 a month"}, and your first three client audits are free.\n\nYou can claim your account here:\n${o.claimUrl ?? o.previewUrl}\n\nWould that fit what you offer?`,
     body_4: `${hi}\n\nI'll leave it here so I'm not filling your inbox. If white-label Google Business Profile work becomes useful for your clients, just reply and I'll pick it up.`,
   };
 }

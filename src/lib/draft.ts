@@ -5,7 +5,7 @@ import { env } from "@/env";
 import { draftProblems, sameBusiness, sampleTargets, type SampleTarget } from "./draft-rules";
 import { creatorContext } from "./creators";
 import { askJson } from "./openrouter";
-import { OFFER_FACTS } from "./offer";
+import { forMarket, marketOf, OFFER_FACTS } from "./offer";
 import { makeSample, PlatformError, type Sample, type SampleResult } from "./platform";
 import type { Facts } from "./research";
 
@@ -192,7 +192,7 @@ ${channel}` : "",
   let notes: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix: string = attempt > 0 ? `\n\nYour previous draft:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
-    const written = await askJson<Draft>({ model: o.writer, system: WRITER, user: brief + fix, maxTokens: 800 });
+    const written = await askJson<Draft>({ model: o.writer, system: forMarket(WRITER, marketOf(o.agency.country)), user: brief + fix, maxTokens: 800 });
     cost += written.usage.costUsd ?? 0;
     draft = { subject: String(written.data.subject ?? "").trim(), body: String(written.data.body ?? "").trim() };
 
@@ -200,7 +200,7 @@ ${channel}` : "",
     if (notes.length === 0) {
       const checked = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
-        system: CHECKER,
+        system: forMarket(CHECKER, marketOf(o.agency.country)),
         user: `${brief}\n\nThe email:\nSubject: ${draft.subject}\n\n${draft.body}`,
         maxTokens: 600,
       });

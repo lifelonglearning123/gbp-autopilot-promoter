@@ -5,26 +5,32 @@ import { env } from "@/env";
 import { bodyHtml, emailsSentTo, replyInThread, takeOutOfCampaign } from "./instantly";
 import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
-import { OFFER_FACTS } from "./offer";
+import { forMarket, marketOf, OFFER_FACTS, type Market } from "./offer";
 import { askJson } from "./openrouter";
 import { shortClaimUrl, type SampleResult } from "./platform";
+import { briefHtml } from "./brief";
 
 /**
  * After the cold sequence: reacting to what each agency does.
  *   Opened the audit, no reply   → a short personal note in the same thread
  *                                   (held WARM_HOLD_HOURS for the owner to
- *                                   stop), then out of the cold sequence.
+ *                                   stop), then out of the cold sequence;
+ *                                   the owner gets a brief on the agency.
+ *   Still no reply or claim      → a second note SECOND_WARM_DAYS later,
+ *                                   held 24 hours.
  *   Claimed their account        → out of the cold sequence; owner told.
  *   Replied "not now"            → a check-in ~75 days later, written then,
  *                                   held 24 hours, sent in the same thread.
- * Messages: step 10 = warm note, step 20 = check-in. Nothing here sends while
+ * Messages: step 10 = warm note, 11 = second warm note, 20 = check-in. Nothing here sends while
  * paused (the caller checks).
  */
 
 export const STEP_WARM = 10;
+export const STEP_WARM_2 = 11;
 export const STEP_CHECK_IN = 20;
 const WARM_HOLD_HOURS = 2;
 const CHECK_IN_DAYS = 75;
+const SECOND_WARM_DAYS = 5;
 
 type Log = (line: string) => void;
 
@@ -36,6 +42,14 @@ Return ONLY a JSON object: {"body": string}.
 - Offer, simply, to run the same audit for one of their real clients: they reply with the business name and town and get it back in their brand. Mention they can also claim their account and run three audits themselves, with the CLAIM LINK written out once on its own line.
 - Do NOT say or hint that you know they opened or viewed anything.
 - No sign-off (added later), no hype, no flattery, no other links, no placeholders. Use only the facts given.`;
+
+const WARM_2 = `You write a second short personal email from Chao, founder of GBP Autopilot, to someone at a marketing agency. They were sent a sample Google Business Profile audit in their own brand, then a note offering to run one for a real client of theirs; they have not replied. It is a reply in the same email thread.
+${OFFER_FACTS}
+
+Return ONLY a JSON object: {"body": string}.
+- 30-70 words, plain text, UK English, greet by first name (else "Hi there").
+- A different angle from the earlier note (shown below): one specific, true thing from the research about how they work with local clients, and how this would take the Google Business Profile work (posts, review replies, reports) off their plate under their brand. One soft question. The CLAIM LINK written out once on its own line.
+- Do NOT say or hint that you know they opened or viewed anything. No guilt, no "just following up", no hype, no flattery, no sign-off (added later), no other links, no placeholders. Use only the facts given.`;
 
 const CHECK_IN = `You write a short check-in email from Chao, founder of GBP Autopilot, to someone at a marketing agency who replied a while ago that it was "not now". It is a reply in the same thread.
 ${OFFER_FACTS}
@@ -56,15 +70,15 @@ function footer(): string {
   return `\n\n${env.SENDER_SIGNOFF.replace(/\\n/g, "\n")}\n\n${legal}\nNot relevant? Reply "remove" and I will take you off this list straight away.`;
 }
 
-async function writeChecked(system: string, brief: string, allowed: string[]): Promise<string | null> {
+async function writeChecked(system: string, brief: string, allowed: string[], market: Market = "UK"): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { data } = await askJson<{ body: string }>({ model: env.WRITER_MODELS.split(",")[0].trim(), system, user: brief, maxTokens: 600 });
+    const { data } = await askJson<{ body: string }>({ model: env.WRITER_MODELS.split(",")[0].trim(), system: forMarket(system, market), user: brief, maxTokens: 600 });
     const body = String(data.body ?? "").trim();
     const links = (body.match(/https?:\/\/\S+/g) ?? []).map((l) => l.replace(/[).,;:!?]+$/, ""));
     if (!body || body.split(/\s+/).length > 100 || links.some((l) => !allowed.includes(l)) || /\{\{|\}\}/.test(body)) continue;
     const { data: check } = await askJson<{ ok: boolean; notes: string[] }>({
       model: env.ANALYSIS_MODEL,
-      system: CHECKER,
+      system: forMarket(CHECKER, market),
       user: `${brief}\n\nThe email:\n${body}`,
       maxTokens: 400,
     });
@@ -91,7 +105,7 @@ async function noteOnce(type: string, contactId: string, agencyId: string, paylo
 
 export async function draftWarmNotes(log: Log) {
   const todo = (await db().execute(sql`
-    select distinct on (c.id) c.id contact_id, c.first_name, a.id agency_id, a.name agency
+    select distinct on (c.id) c.id contact_id, c.first_name, a.id agency_id, a.name agency, a.country
     from events e
     join contacts c on c.id = e.contact_id
     join agencies a on a.id = c.agency_id
@@ -102,7 +116,7 @@ export async function draftWarmNotes(log: Log) {
       and not exists (select 1 from messages m where m.contact_id = c.id and m.step = ${STEP_WARM})
       and not exists (select 1 from replies r where r.contact_id = c.id)
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
-    order by c.id limit 10`)) as unknown as { contact_id: string; first_name: string | null; agency_id: string; agency: string }[];
+    order by c.id limit 10`)) as unknown as { contact_id: string; first_name: string | null; agency_id: string; agency: string; country: string | null }[];
 
   for (const t of todo) {
     const [sample] = await db().select().from(samples).where(eq(samples.contactId, t.contact_id)).orderBy(desc(samples.createdAt)).limit(1);
@@ -116,7 +130,7 @@ export async function draftWarmNotes(log: Log) {
       .limit(1);
     const claim = shortClaimUrl(sample) ?? sample.previewUrl;
     const brief = `First name: ${t.first_name ?? "(unknown)"}\nAgency: ${t.agency}\nResearch: ${research?.summary ?? ""}\nThe audit sent: "${result.title}", score ${result.score}/100.\nClaim link: ${claim}`;
-    const body = await writeChecked(WARM, brief, [claim, sample.previewUrl]);
+    const body = await writeChecked(WARM, brief, [claim, sample.previewUrl], marketOf(t.country));
     if (!body) {
       log(`warm note for ${t.agency}: writer failed the check twice, skipped`);
       continue;
@@ -137,9 +151,72 @@ export async function draftWarmNotes(log: Log) {
       `${t.agency} opened their audit — a note goes in ${WARM_HOLD_HOURS} hours`,
       `<p><b>${esc(t.first_name ?? "")} at ${esc(t.agency)}</b> opened the sample audit. This note goes to them, as a reply in the same thread, in ${WARM_HOLD_HOURS} hours, and they come out of the cold sequence:</p>
        <blockquote style="border-left:3px solid #ccc;padding-left:12px">${esc(body).replace(/\n/g, "<br>")}</blockquote>
-       <p><a href="${actionLink("stop", m.id)}">Stop this note</a> · or write to them yourself from Instantly's Unibox.</p>`,
+       <p><a href="${actionLink("stop", m.id)}">Stop this note</a> · or write to them yourself from Instantly's Unibox.</p>
+       ${await briefHtml(t.agency_id).catch(() => "")}`,
     ).catch(() => {});
     log(`warm note drafted for ${t.agency}; owner told`);
+  }
+}
+
+/* ── Still quiet after the warm note → a second one ─────────────────────── */
+
+export async function draftSecondWarmNotes(log: Log) {
+  const todo = (await db().execute(sql`
+    select c.id contact_id, c.first_name, a.id agency_id, a.name agency, a.country, w.body first_note
+    from messages w
+    join contacts c on c.id = w.contact_id
+    join agencies a on a.id = c.agency_id
+    where w.step = ${STEP_WARM} and w.sent_at <= now() - make_interval(days => ${SECOND_WARM_DAYS})
+      and a.status not in ('claimed', 'customer', 'suppressed', 'lost')
+      and not exists (select 1 from messages m where m.contact_id = c.id and m.step = ${STEP_WARM_2})
+      and not exists (select 1 from replies r where r.contact_id = c.id)
+      and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
+    limit 10`)) as unknown as { contact_id: string; first_name: string | null; agency_id: string; agency: string; country: string | null; first_note: string }[];
+
+  for (const t of todo) {
+    const [sample] = await db().select().from(samples).where(eq(samples.contactId, t.contact_id)).orderBy(desc(samples.createdAt)).limit(1);
+    if (!sample) continue;
+    const [research] = await db()
+      .select({ summary: agencyResearch.summary, facts: agencyResearch.facts })
+      .from(agencyResearch)
+      .where(eq(agencyResearch.agencyId, t.agency_id))
+      .orderBy(desc(agencyResearch.version))
+      .limit(1);
+    const facts = (research?.facts ?? {}) as { services?: string[]; niches?: string[] };
+    const claim = shortClaimUrl(sample) ?? sample.previewUrl;
+    const brief = [
+      `First name: ${t.first_name ?? "(unknown)"}`,
+      `Agency: ${t.agency}`,
+      `Research: ${research?.summary ?? ""}`,
+      `Services: ${(facts.services ?? []).join(", ")}`,
+      `Niches: ${(facts.niches ?? []).join(", ")}`,
+      `Claim link: ${claim}`,
+      `The earlier note:\n${t.first_note}`,
+    ].join("\n");
+    const body = await writeChecked(WARM_2, brief, [claim, sample.previewUrl], marketOf(t.country));
+    if (!body) {
+      log(`second warm note for ${t.agency}: writer failed the check twice, skipped`);
+      continue;
+    }
+    const [m] = await db()
+      .insert(messages)
+      .values({
+        contactId: t.contact_id,
+        writerModel: env.WRITER_MODELS.split(",")[0].trim(),
+        step: STEP_WARM_2,
+        subject: null,
+        body,
+        guardrail: { ok: true, notes: ["second warm note"] },
+        holdUntil: new Date(Date.now() + 24 * 3_600_000),
+      })
+      .returning({ id: messages.id });
+    await tellOwner(
+      `${t.agency}: a second note goes in 24 hours`,
+      `<p>No reply or claim from <b>${esc(t.first_name ?? "")} at ${esc(t.agency)}</b> since the warm note ${SECOND_WARM_DAYS} days ago. This goes to them in the same thread in 24 hours:</p>
+       <blockquote style="border-left:3px solid #ccc;padding-left:12px">${esc(body).replace(/\n/g, "<br>")}</blockquote>
+       <p><a href="${actionLink("stop", m.id)}">Stop this note</a> · or write to them yourself from Instantly's Unibox.</p>`,
+    ).catch(() => {});
+    log(`second warm note drafted for ${t.agency}; owner told`);
   }
 }
 
@@ -193,14 +270,14 @@ export async function scheduleCheckIns(log: Log) {
 /** Write check-ins that have come due; they then wait 24 hours (shown in the daily summary). */
 export async function writeDueCheckIns(log: Log) {
   const due = (await db().execute(sql`
-    select m.id, m.contact_id, c.first_name, a.name agency,
+    select m.id, m.contact_id, c.first_name, a.name agency, a.country,
            (select body from replies r where r.contact_id = m.contact_id order by received_at desc limit 1) their_reply
     from messages m join contacts c on c.id = m.contact_id join agencies a on a.id = c.agency_id
     where m.step = ${STEP_CHECK_IN} and m.writer_model = 'pending' and m.hold_until <= now() and m.stopped_at is null
-    limit 10`)) as unknown as { id: string; contact_id: string; first_name: string | null; agency: string; their_reply: string | null }[];
+    limit 10`)) as unknown as { id: string; contact_id: string; first_name: string | null; agency: string; country: string | null; their_reply: string | null }[];
   for (const t of due) {
     const brief = `First name: ${t.first_name ?? "(unknown)"}\nAgency: ${t.agency}\nTheir earlier reply: ${(t.their_reply ?? "").slice(0, 800)}`;
-    const body = await writeChecked(CHECK_IN, brief, []);
+    const body = await writeChecked(CHECK_IN, brief, [], marketOf(t.country));
     if (!body) continue;
     await db()
       .update(messages)
@@ -216,13 +293,13 @@ export async function sendDueNotes(log: Log) {
   const due = (await db().execute(sql`
     select m.id, m.step, m.body, m.contact_id, c.email, a.id agency_id, a.name agency
     from messages m join contacts c on c.id = m.contact_id join agencies a on a.id = c.agency_id
-    where m.step in (${STEP_WARM}, ${STEP_CHECK_IN}) and m.sent_at is null and m.stopped_at is null
+    where m.step in (${STEP_WARM}, ${STEP_WARM_2}, ${STEP_CHECK_IN}) and m.sent_at is null and m.stopped_at is null
       and (m.guardrail->>'ok')::boolean and m.hold_until <= now()
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     limit 20`)) as unknown as { id: string; step: number; body: string; contact_id: string; email: string; agency_id: string; agency: string }[];
   for (const t of due) {
     // A warm note is pointless once they have replied themselves.
-    if (t.step === STEP_WARM) {
+    if (t.step === STEP_WARM || t.step === STEP_WARM_2) {
       const [r] = (await db().execute(sql`select 1 from replies where contact_id = ${t.contact_id} limit 1`)) as unknown[];
       if (r) {
         await db().update(messages).set({ stoppedAt: new Date() }).where(eq(messages.id, t.id));
@@ -240,6 +317,6 @@ export async function sendDueNotes(log: Log) {
       await takeOutOfCampaign(lead.leadId, lead.campaignId).catch(() => {});
       await noteOnce("lead.taken_out", t.contact_id, t.agency_id, { why: "warm note sent" });
     }
-    log(`${t.step === STEP_WARM ? "warm note" : "check-in"} sent to ${t.agency}`);
+    log(`${t.step === STEP_WARM ? "warm note" : t.step === STEP_WARM_2 ? "second warm note" : "check-in"} sent to ${t.agency}`);
   }
 }

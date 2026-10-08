@@ -6,7 +6,7 @@ import { followUpProblems, templateFollowUps, type FollowUps } from "./draft-rul
 import { bodyHtml, campaignLeads, sequenceSteps, setCampaignSequence, setLeadVars } from "./instantly";
 import { askJson } from "./openrouter";
 import { shortClaimUrl } from "./platform";
-import { OFFER_FACTS } from "./offer";
+import { AGENCY_PRICE, forMarket, marketOf, OFFER_FACTS } from "./offer";
 import type { SampleResult } from "./platform";
 import type { Facts } from "./research";
 
@@ -92,7 +92,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix: string = attempt > 0 ? `\n\nYour previous drafts:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
     // If the writer cannot be reached, the template follow-ups stand in rather than leaving the lead without any.
-    const written = await askJson<FollowUps>({ model: contact.writerModel ?? env.WRITER_MODELS.split(",")[0].trim(), system: WRITER, user: brief + fix, maxTokens: 1200 }).catch(
+    const written = await askJson<FollowUps>({ model: contact.writerModel ?? env.WRITER_MODELS.split(",")[0].trim(), system: forMarket(WRITER, marketOf(agency.country)), user: brief + fix, maxTokens: 1200 }).catch(
       (e: unknown) => {
         notes = [`writer unavailable: ${e instanceof Error ? e.message : e}`];
         return null;
@@ -108,7 +108,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
     if (notes.length === 0) {
       const checked = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
-        system: CHECKER,
+        system: forMarket(CHECKER, marketOf(agency.country)),
         user: `${brief}\n\nThe follow-ups:\n${JSON.stringify(draft, null, 1)}`,
         maxTokens: 600,
       });
@@ -119,7 +119,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
 
   const template = notes.length > 0;
   const final = template
-    ? templateFollowUps({ firstName: contact.firstName, finding: result.gaps?.[1]?.note ?? result.gaps?.[0]?.note ?? null, previewUrl: sample.previewUrl, claimUrl: shortClaimUrl(sample) })
+    ? templateFollowUps({ firstName: contact.firstName, finding: result.gaps?.[1]?.note ?? result.gaps?.[0]?.note ?? null, previewUrl: sample.previewUrl, claimUrl: shortClaimUrl(sample), price: AGENCY_PRICE[marketOf(agency.country)] })
     : draft!;
 
   // Replace earlier unsent follow-ups for this contact.
