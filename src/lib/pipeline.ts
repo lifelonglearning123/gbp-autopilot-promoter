@@ -7,7 +7,7 @@ import { draftFirstEmail } from "./draft";
 import { draftFollowUps, followUpVars, syncFollowUps } from "./followups";
 import { setVerificationTag, upsertGhlContact, verificationTag } from "./ghl";
 import { importGhl } from "./import-ghl";
-import { addLeads, blockList, bodyHtml, verificationStatus, verifyEmail, type Verified } from "./instantly";
+import { addLeads, blockList, bodyHtml, reopenIfCompleted, verificationStatus, verifyEmail, type Verified } from "./instantly";
 import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
@@ -264,6 +264,7 @@ async function pushInto(campaignId: string | undefined, track: Track, limit: num
     if (r) await db().update(messages).set({ instantlyCampaignId: campaignId, instantlyLeadId: lead.id, pushedAt: now }).where(eq(messages.id, r.id));
   }
   log(`pushed ${res.created_leads?.length ?? 0} of ${ready.length} into the ${TRACK_NAME[track]} campaign`);
+  if (res.created_leads?.length && (await reopenIfCompleted(campaignId).catch(() => false))) log(`the ${TRACK_NAME[track]} campaign had finished; switched back on for the new leads`);
   return res.created_leads?.length ?? 0;
 }
 

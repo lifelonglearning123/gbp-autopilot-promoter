@@ -300,3 +300,17 @@ export async function blockList(values: string[]) {
   if (values.length === 0) return;
   await api("POST", "/block-lists-entries/bulk-create", { bl_values: values.slice(0, 1000) });
 }
+
+/**
+ * Instantly marks a campaign "completed" (status 3) once every lead in it has
+ * finished — including a campaign activated before its first lead arrived —
+ * and a completed campaign sends nothing to leads added later. So after adding
+ * leads, a completed campaign is switched back on. A paused or draft one is
+ * left as it is: that is a person's choice.
+ */
+export async function reopenIfCompleted(campaignId: string): Promise<boolean> {
+  const c = await api<{ status?: number }>("GET", `/campaigns/${campaignId}`);
+  if (c.status !== 3) return false;
+  await api("POST", `/campaigns/${campaignId}/activate`);
+  return true;
+}
