@@ -76,6 +76,12 @@ export async function verifySome(limit: number, deadline: number, log: Log) {
       v = c.email_status === "pending" ? await verificationStatus(c.email) : await verifyEmail(c.email);
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
+      // Instantly forgets a pending check after a while ("job not found; re-submit"): ask afresh.
+      if (c.email_status === "pending" && /\b404\b/.test(why)) {
+        await db().update(contacts).set({ emailStatus: "unverified", updatedAt: new Date() }).where(eq(contacts.id, c.id));
+        tally.resubmit = (tally.resubmit ?? 0) + 1;
+        return;
+      }
       // No credits or a refused key will not fix itself this run: stop and say so.
       if (/ 40[123]\b|credit/i.test(why)) stopped = why;
       tally.error = (tally.error ?? 0) + 1;
