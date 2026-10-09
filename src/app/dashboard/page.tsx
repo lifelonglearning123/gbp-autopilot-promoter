@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { pausedState } from "@/lib/control";
 import { waitingDrafts } from "@/lib/pipeline";
-import { dayNumbers, recentProblems } from "@/lib/summary";
+import { dayNumbers, recentProblems, weeklyResultsHtml } from "@/lib/summary";
 import { dashboardAction, isOwner, logIn } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     );
   }
 
-  const [paused, n, next, problems] = await Promise.all([pausedState(), dayNumbers(), waitingDrafts(), recentProblems()]);
+  const [paused, n, next, problems, weekly] = await Promise.all([pausedState(), dayNumbers(), waitingDrafts(), recentProblems(), weeklyResultsHtml()]);
   const replies = (await db().execute(sql`
     select r.received_at, r.classification, r.body, a.name agency
     from replies r join contacts c on c.id = r.contact_id join agencies a on a.id = c.agency_id
@@ -77,6 +77,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div style={{ fontSize: 22, fontWeight: 600 }}>{v}</div>
           </div>
         ))}
+      </div>
+
+      <div style={card}>
+        <h2 style={{ fontSize: 18, marginTop: 0 }}>Weekly results</h2>
+        {/* Our own numbers with escaped labels (summary.ts); Monday's email carries the same tables. */}
+        <div style={{ overflowX: "auto" }} dangerouslySetInnerHTML={{ __html: weekly }} />
       </div>
 
       {problems.length > 0 && (
