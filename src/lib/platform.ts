@@ -74,7 +74,8 @@ export function shortClaimUrl(sample: { claimUrl: string | null; platformToken: 
 /** A pre-filled signup link on its own (30 days), and its short /c/<token> form to put in an email. */
 export function claimLink(req: {
   agencyName: string;
-  email: string;
+  /** Needed, except for a creator reached by DM: they type it at signup. */
+  email?: string;
   fullName?: string;
   logoUrl?: string | null;
   colour?: string | null;

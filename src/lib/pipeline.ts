@@ -421,9 +421,9 @@ export async function hourlyRun(budgetMs: number) {
       await step("research", () => researchSome(30, deadline, log));
       await step("site contacts", () => contactsFromSites(30, log));
       await step("draft", () => draftSome(20, deadline, log));
-      // Creator DMs after the agency drafts: the agency emails always come first.
+      // Creator emails, then DMs: both after the agency drafts, which always come first.
+      await step("creator emails", () => draftPartners(10, log, deadline));
       await step("youtube DMs", () => queueTasks(10, log, deadline));
-      await step("creator emails", () => draftPartners(5, log, deadline));
     }
   }
   if (skipped.length) log(`out of time, left for next run: ${skipped.join(", ")}`);

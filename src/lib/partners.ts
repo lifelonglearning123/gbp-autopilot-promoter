@@ -120,14 +120,20 @@ export async function draftPartners(limit: number, log: Log, deadline = Infinity
     where c.source like 'partner:%' and c.email_status = 'valid' and a.status = 'partner'
       and not exists (select 1 from messages m where m.contact_id = c.id and m.stopped_at is null)
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
+    order by c.created_at
     limit ${limit}`)) as unknown as { id: string }[];
   const tally: Record<string, number> = {};
-  for (const { id } of todo) {
-    if (deadline - Date.now() < 240_000) break;
-    const r = await draftPartner(id).catch((e: unknown) => ({ why: e instanceof Error ? e.message : String(e) }));
-    const k = "why" in r ? `failed (${r.why.slice(0, 80)})` : r.passed ? "queued" : "needs_review";
-    tally[k] = (tally[k] ?? 0) + 1;
-  }
+  // Three at a time: each is an audit, a sequence written and checked (a minute or two).
+  const queue = [...todo];
+  await Promise.all(
+    Array.from({ length: 3 }, async () => {
+      for (let t = queue.shift(); t && deadline - Date.now() > 240_000; t = queue.shift()) {
+        const r = await draftPartner(t.id).catch((e: unknown) => ({ why: e instanceof Error ? e.message : String(e) }));
+        const k = "why" in r ? `failed (${r.why.slice(0, 80)})` : r.passed ? "queued" : "needs_review";
+        tally[k] = (tally[k] ?? 0) + 1;
+      }
+    }),
+  );
   if (todo.length) log(`creator emails: ${JSON.stringify(tally)}`);
 }
 

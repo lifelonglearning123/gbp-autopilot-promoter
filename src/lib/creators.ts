@@ -6,6 +6,7 @@ import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks, tiktokHandle, t
 import { PARTNER_FACTS } from "./offer";
 import { findWebsite, searchTikTok } from "./dataforseo";
 import { askJson } from "./openrouter";
+import { claimLink } from "./platform";
 import { channels, recentUploads, searchVideos, videoDescriptions } from "./youtube";
 
 /**
@@ -275,10 +276,22 @@ const PARTNER_DMS = `You write short direct messages from Chao, founder of GBP A
 ${PARTNER_FACTS}
 
 Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script": string}.
-- instagram: 25-50 words, casual (also sent as their TikTok DM), mention one of their recent videos by its topic, say they can have their own white-label Google Business Profile service in their brand at no cost, and earn 40% of what every business on it pays, for life. Ask if they'd like it set up. No links.
-- skool: 40-70 words, a little fuller than Instagram, same content, friendly and community-appropriate. No links.
+- instagram: 25-50 words, casual (also sent as their TikTok DM), mention one of their recent videos by its topic, say they can have their own white-label Google Business Profile service in their brand at no cost, and earn 40% of what every business on it pays, for life. End with one short line inviting them to set theirs up at the link below. Do not write any link yourself: their own link is added on its own line after your message.
+- skool: 40-70 words, a little fuller than Instagram, same content, friendly and community-appropriate, ending the same way. Do not write any link yourself.
 - phone_script: 60-100 words for a short call: who you are, why them (their channel), the offer in one line (their own branded version, free, 40% for life), ask whether you can email their claim link.
 UK English. No hype, no flattery, no placeholders, no terms beyond the facts given.`;
+
+/** Creators a day given DMs and calls: about what one person can send by hand. */
+export const DMS_PER_DAY = 30;
+
+/**
+ * A creator's own short claim link for DMs (creator terms, free, 40%). Creators
+ * reached by DM often publish no email, so the link carries none.
+ */
+export async function creatorLink(c: { id: string; title: string; emails: { email: string }[] }): Promise<string> {
+  const { claimUrl, shortUrl } = await claimLink({ agencyName: c.title, email: c.emails[0]?.email, externalRef: c.id, offer: "creator" });
+  return shortUrl ?? claimUrl;
+}
 
 /**
  * For each creator: a message per network they publish (Instagram, Skool) and
@@ -287,12 +300,19 @@ UK English. No hype, no flattery, no placeholders, no terms beyond the facts giv
  */
 /** Each creator is a model call (~a minute with Kimi): three at a time, and none started once the run is short of time. */
 export async function queueTasks(limit: number, log: Log, deadline = Infinity) {
+  // No more creators a day than a person can message by hand (Instagram allows
+  // about 20-30 cold DMs a day): the best-fitting first, the rest wait.
+  const [{ today }] = (await db().execute(sql`
+    select count(distinct creator_id)::int today from outreach_tasks where created_at >= date_trunc('day', now())`)) as unknown as { today: number }[];
+  const room = Math.min(limit, Math.max(0, DMS_PER_DAY - today));
+  if (room === 0) return;
   const ids = (await db().execute(sql`
     select cr.id from creators cr
     where cr.status in ('in_pipeline', 'no_email', 'partner_pipeline', 'partner_no_email')
       and not exists (select 1 from outreach_tasks t where t.creator_id = cr.id)
       and (cr.links ? 'instagram' or cr.links ? 'skool' or cr.links ? 'tiktok' or jsonb_array_length(cr.phones) > 0)
-    limit ${limit}`)) as unknown as { id: string }[];
+    order by cr.fit_score desc nulls last, cr.created_at
+    limit ${room}`)) as unknown as { id: string }[];
   const todo = ids.length ? await db().select().from(creators).where(inArray(creators.id, ids.map((r) => r.id))) : [];
   let n = 0;
   const queue = [...todo];
@@ -309,6 +329,11 @@ ${recent}`,
       maxTokens: 800,
     }).catch(() => ({ data: null }));
     if (!data) return;
+    // Their own link: signup already on the creator terms, in their name (they type their email there).
+    const link = await creatorLink(c).catch(() => null);
+    if (!link) return; // the platform is not answering: this creator is tried again next run
+    data.instagram = `${data.instagram.trim()}\n\n${link}`;
+    data.skool = `${data.skool.trim()}\n\n${link}`;
 
     let due = new Date();
     if (c.agencyId) {
