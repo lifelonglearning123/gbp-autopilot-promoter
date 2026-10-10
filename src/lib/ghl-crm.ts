@@ -2,7 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { contacts, creators, outreachTasks } from "@/db/schema";
 import { env } from "@/env";
-import { verificationTag } from "./ghl";
+import { findGhlContact, verificationTag } from "./ghl";
 import { verifyEmail, type Verified } from "./instantly";
 
 /**
@@ -69,17 +69,24 @@ async function syncOne(id: string): Promise<number> {
   const verdict = email ? await checked(email) : null;
   if (email && !verdict) return 0;
   const tag = verdict ? verificationTag(verdict) : null;
-  const up = await call<{ contact?: { id?: string } }>("POST", "/contacts/upsert", {
-    locationId: env.ghl_location,
-    name: c.title,
-    companyName: c.title,
-    ...(email ? { email } : {}),
-    ...(phone ? { phone } : {}),
-    ...(c.links.website ? { website: c.links.website } : {}),
-    tags: ["youtube-creator", `yt-${c.kind ?? "unknown"}`, ...(c.usesGhl ? ["uses-ghl"] : []), ...(tag ? [tag] : [])],
-    source: "YouTube outreach (GBP Autopilot)",
-  });
-  const contactId = up.contact?.id;
+  const tags = ["youtube-creator", `yt-${c.kind ?? "unknown"}`, ...(c.usesGhl ? ["uses-ghl"] : []), ...(tag ? [tag] : [])];
+  // Someone already in the owner's GHL keeps everything they have: our tags are added, nothing is overwritten.
+  let contactId = await findGhlContact(email, phone);
+  if (contactId) {
+    await call("POST", `/contacts/${contactId}/tags`, { tags });
+  } else {
+    const up = await call<{ contact?: { id?: string } }>("POST", "/contacts/upsert", {
+      locationId: env.ghl_location,
+      name: c.title,
+      companyName: c.title,
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+      ...(c.links.website ? { website: c.links.website } : {}),
+      tags,
+      source: "YouTube outreach (GBP Autopilot)",
+    });
+    contactId = up.contact?.id ?? null;
+  }
   if (!contactId) return 0;
 
   const details = [

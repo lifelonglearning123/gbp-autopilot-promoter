@@ -121,10 +121,24 @@ async function ghl<T>(method: string, path: string, body?: unknown): Promise<T> 
   return data;
 }
 
+/** The owner's existing GHL contact with this email (or, failing that, phone), if there is one. */
+export async function findGhlContact(email?: string | null, phone?: string | null): Promise<string | null> {
+  for (const [k, v] of [["email", email], ["number", phone]] as const) {
+    if (!v) continue;
+    const r = await ghl<{ contact?: { id?: string } | null }>(
+      "GET",
+      `/contacts/search/duplicate?locationId=${env.ghl_location}&${k}=${encodeURIComponent(v)}`,
+    );
+    if (r.contact?.id) return r.contact.id;
+  }
+  return null;
+}
+
 /**
- * The GHL contact for an address: found or added (GHL matches on email). Only
- * the basics are sent, and no tags, so an existing contact's tags are never
- * replaced.
+ * The GHL contact for an address: the owner's existing one, untouched, or a
+ * new one. An existing contact is never updated here — an upsert overwrote the
+ * source and company of a contact the owner had since 2025 (2026-10-10) — so
+ * callers only ADD tags and notes to it.
  */
 export async function upsertGhlContact(c: {
   email: string;
@@ -133,6 +147,8 @@ export async function upsertGhlContact(c: {
   companyName?: string | null;
   website?: string | null;
 }): Promise<string> {
+  const existing = await findGhlContact(c.email);
+  if (existing) return existing;
   const up = await ghl<{ contact?: { id?: string } }>("POST", "/contacts/upsert", {
     locationId: env.ghl_location,
     email: c.email,
