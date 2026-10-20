@@ -12,6 +12,8 @@ import { actionLink } from "./links";
 import { esc, tellOwner } from "./notify";
 import { askJson } from "./openrouter";
 import { researchAgency } from "./research";
+import { failureKind, SET_ASIDE_DAYS } from "./failure-rules";
+import { recordRefusal, setAside } from "./model-health";
 import { contactsFromSites, discoverHighLevel } from "./highlevel";
 import { closeAnsweredTasks, discoverCreators, discoverTikTok, enrichCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
@@ -28,11 +30,11 @@ type Log = (line: string) => void;
 const left = (deadline: number) => deadline - Date.now();
 
 /** Many at once, until the list or the time runs out. */
-async function pool<T>(items: T[], parallel: number, deadline: number, fn: (t: T) => Promise<void>) {
+async function pool<T>(items: T[], parallel: number, deadline: number, fn: (t: T) => Promise<void>, stop?: () => boolean) {
   const queue = [...items];
   await Promise.all(
     Array.from({ length: parallel }, async () => {
-      for (let t = queue.shift(); t !== undefined && left(deadline) > 90_000; t = queue.shift()) {
+      for (let t = queue.shift(); t !== undefined && left(deadline) > 90_000 && !stop?.(); t = queue.shift()) {
         await fn(t).catch(() => {});
       }
     }),
@@ -161,20 +163,56 @@ export async function draftSome(limit: number, deadline: number, log: Log) {
   const todo = (await db().execute(sql`
     select distinct on (a.id) c.id
     from agencies a join contacts c on c.agency_id = a.id
-    where a.status = 'researched' and c.email_status = 'valid'
+    where c.email_status = 'valid'
+      -- An agency set aside after a failed draft gets another go a week later
+      -- (never a creator's: those are drafted by the creator step).
+      and (a.status = 'researched' or (a.status = 'draft_failed' and a.updated_at < now() - make_interval(days => ${SET_ASIDE_DAYS}) and c.source not like 'partner:%'))
       and not exists (select 1 from messages m join contacts c2 on c2.id = m.contact_id where c2.agency_id = a.id)
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     order by a.id, (c.email_type = 'work') desc, c.created_at
     limit ${limit}`)) as unknown as { id: string }[];
   const tally: Record<string, number> = {};
-  await pool(todo, 3, deadline, async (c) => {
-    const r = await draftFirstEmail(c.id);
-    // The whole sequence is written at once: a lead is only pushed with all four.
-    if (r.ok && r.passed) await draftFollowUps(c.id);
-    const k = r.ok ? (r.passed ? "queued" : "needs_review") : r.why.split(":")[0];
-    tally[k] = (tally[k] ?? 0) + 1;
-  });
+  // Why the step stopped early, when it did (failure-rules.ts). A writer that
+  // threw used to vanish into pool's catch without even a tally.
+  let stopped: string | null = null;
+  const stopWith = async (e: unknown, atLeast?: "temporary") => {
+    const why = e instanceof Error ? e.message : String(e);
+    const found = failureKind(e);
+    const kind = found === "item" && atLeast ? atLeast : found;
+    if (!stopped) stopped = `${kind}: ${why.slice(0, 200)}`;
+    if (kind === "account") await recordRefusal("agency emails", why);
+  };
+  await pool(
+    todo,
+    3,
+    deadline,
+    async (c) => {
+      let r: Awaited<ReturnType<typeof draftFirstEmail>>;
+      try {
+        r = await draftFirstEmail(c.id);
+      } catch (e) {
+        if (failureKind(e) === "item") {
+          await setAside(c.id, e instanceof Error ? e.message : String(e));
+          tally["set aside"] = (tally["set aside"] ?? 0) + 1;
+        } else {
+          await stopWith(e);
+        }
+        return;
+      }
+      // The platform could not make the sample (down, its limits, its key): not this agency's doing.
+      if (!r.ok && r.why.startsWith("sample:")) {
+        await stopWith(new Error(r.why), "temporary");
+        return;
+      }
+      // The whole sequence is written at once: a lead is only pushed with all four.
+      if (r.ok && r.passed) await draftFollowUps(c.id);
+      const k = r.ok ? (r.passed ? "queued" : "needs_review") : r.why.split(":")[0];
+      tally[k] = (tally[k] ?? 0) + 1;
+    },
+    () => stopped !== null,
+  );
   if (todo.length) log(`drafted: ${JSON.stringify(tally)}`);
+  if (stopped) log(`drafting stopped, ${stopped}`);
 }
 
 /** Leads already in the campaign without follow-ups (a failed write) get them. */

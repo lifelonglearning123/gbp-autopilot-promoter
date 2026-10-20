@@ -5,6 +5,7 @@ import { pausedState } from "./control";
 import { actionLink } from "./links";
 import { esc } from "./notify";
 import { waitingDrafts } from "./pipeline";
+import { currentRefusal } from "./model-health";
 
 /**
  * What happened in the last 24 hours and what goes next, for the owner:
@@ -28,6 +29,7 @@ export async function dayNumbers() {
       (select count(*) from agencies where status in ('claimed', 'customer'))::int total_signups,
       (select count(*) from messages where pushed_at is null and not coalesce((guardrail->>'ok')::boolean, false) and stopped_at is null)::int needs_review,
       (select count(*) from agencies where status = 'new')::int to_research,
+      (select count(*) from agencies where status = 'draft_failed')::int set_aside,
       (select count(*) from creators where channel_id not like 'tiktok:%')::int yt_found,
       (select count(*) from creators where channel_id like 'tiktok:%')::int tt_found,
       (select count(*) from creators where channel_id like 'tiktok:%' and created_at > now() - interval '24 hours')::int tt_new,
@@ -50,6 +52,7 @@ export async function dailySummaryHtml(): Promise<{ subject: string; html: strin
   const paused = await pausedState();
   const next = (await waitingDrafts()).filter((d) => !d.hold_until || new Date(d.hold_until).getTime() < Date.now() + 24 * 3_600_000);
   const problems = await recentProblems();
+  const refused = await currentRefusal();
   const dash = `${(env.APP_URL ?? "").replace(/\/$/, "")}/dashboard`;
   const row = (label: string, v: number | string) => `<tr><td style="padding:2px 16px 2px 0;color:#555">${label}</td><td><b>${v}</b></td></tr>`;
 
@@ -67,10 +70,11 @@ export async function dailySummaryHtml(): Promise<{ subject: string; html: strin
   const html = `<div style="font-family:Arial,sans-serif;max-width:640px">
   <h2 style="margin:0 0 8px">GBP Autopilot outreach — daily summary</h2>
   ${status}
+  ${refused ? `<p style="background:#fdecec;padding:10px">⛔ <b>Nothing is being written.</b> The writing model refused our account (${esc(refused.step)}): ${esc(refused.message)}. Top it up or fix the key; drafting starts again on the next run.</p>` : ""}
   <h3>Last 24 hours</h3>
   <table>${row("Emails sent", n.sent)}${row("Replies", `${n.replies} (${n.interested} interested, ${n.removes} asked to be removed)`)}${row("Bounces", n.bounced)}${row("Audits viewed", n.viewed)}${row("Sign-ups", n.signups)}${row("Added to the campaign", n.pushed)}</table>
   <h3>So far</h3>
-  <table>${row("In the campaign", n.total_pushed)}${row("Sent", n.total_sent)}${row("Replies", n.total_replies)}${row("Signed up", n.total_signups)}${row("Agencies still to research", n.to_research)}${row("Drafts that failed the check (not sent)", n.needs_review)}</table>
+  <table>${row("In the campaign", n.total_pushed)}${row("Sent", n.total_sent)}${row("Replies", n.total_replies)}${row("Signed up", n.total_signups)}${row("Agencies still to research", n.to_research)}${row("Drafts that failed the check (not sent)", n.needs_review)}${row("Set aside: a draft could not be written (tried again after a week)", n.set_aside)}</table>
   <h3>YouTube and TikTok creators</h3>
   <table>${row("YouTube channels found (new in 24h)", `${n.yt_found} (${n.yt_new})`)}${row("TikTok accounts found (new in 24h)", `${n.tt_found} (${n.tt_new})`)}${row("Creators for the creator offer (free white-label, 40% for life)", n.yt_partners)}${row("Creators emailed so far", n.partners_emailed)}${row("DMs and calls due now", n.dms_due)}${row("DMs sent in 24h", n.dms_sent)}</table>
   ${n.dms_due ? `<p><a href="${dash.replace(/\/dashboard$/, "/queue")}">Open the DM queue (${n.dms_due} due)</a></p>` : ""}
@@ -80,7 +84,7 @@ export async function dailySummaryHtml(): Promise<{ subject: string; html: strin
   ${problems.length ? `<h3>Problems</h3><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
   <p><a href="${dash}">Open the dashboard</a></p>
 </div>`;
-  const subject = `${paused.paused ? "⏸ Paused · " : ""}Outreach: ${n.sent} sent, ${n.replies} replies, ${next.length} going out next`;
+  const subject = `${refused ? "⛔ Not writing · " : ""}${paused.paused ? "⏸ Paused · " : ""}Outreach: ${n.sent} sent, ${n.replies} replies, ${next.length} going out next`;
   return { subject, html };
 }
 

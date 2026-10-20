@@ -3,6 +3,8 @@
  */
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { failureKind, SET_ASIDE_DAYS } from "../src/lib/failure-rules";
 import { agencyKey, domainOf, emailType, looksLikeAgency, pickSiteEmail, tidyEmail } from "../src/lib/contact-rules";
 import { signedByPlatform } from "../src/lib/platform";
 import { countryFromLocation, ghlTraces, internalLinks, logoCandidates, pageText, pickPages, publishedEmails, themeColour } from "../src/lib/crawl-rules";
@@ -328,6 +330,56 @@ check("a stop / pause link works only with its own signature", () => {
   assert.equal(signatureOk("pause", "abc", s), false, "another action");
   assert.equal(signatureOk("delete", "abc", s), false, "not an action");
   assert.equal(signatureOk("stop", "abc", null), false);
+});
+
+console.log("A failed draft: ours, the moment's, or its own");
+check("the account, a passing fault and the item are told apart", () => {
+  // What every draft has failed with since 14:11 on 10 October 2026.
+  const moonshot = new Error("Moonshot 429: Your account org-9363b3b3 <ak-fd3e7> is suspended due to insufficient balance, please recharge your account or check your plan and billing details");
+  assert.equal(failureKind(moonshot), "account", "a suspended account is never one creator's fault");
+  assert.equal(failureKind(new Error("OpenRouter 402: Insufficient credits")), "account");
+  assert.equal(failureKind(new Error("OpenRouter 401: No auth credentials found")), "account");
+  assert.equal(failureKind(new Error("OPENROUTER_API_KEY is not set.")), "account");
+  assert.equal(failureKind(new Error("OpenRouter 429: Rate limit exceeded")), "temporary");
+  assert.equal(failureKind(new Error("Moonshot 503: overloaded")), "temporary");
+  assert.equal(failureKind(new Error("The operation was aborted due to timeout")), "temporary");
+  assert.equal(failureKind(new Error("fetch failed")), "temporary");
+  // The platform's own error carries its status.
+  const platform = (status: number, message: string) => Object.assign(new Error(message), { status });
+  assert.equal(failureKind(platform(503, "No house agency is set")), "temporary");
+  assert.equal(failureKind(platform(429, "The bot has made 300 samples in the last day.")), "temporary");
+  assert.equal(failureKind(platform(401, "Unauthorized")), "account");
+  assert.equal(failureKind(platform(0, "PLATFORM_BOT_API_KEY is not set.")), "account");
+  assert.equal(failureKind(platform(404, "Nothing on Google under that name")), "item");
+  // Its own: a model that answered with something other than JSON.
+  assert.equal(failureKind(new Error("moonshotai/kimi-k3 did not return JSON (cut off at max_tokens).")), "item");
+  assert.equal(failureKind(new Error("no creator for this contact")), "item");
+  assert.equal(SET_ASIDE_DAYS, 7);
+});
+
+check("a draft that fails is set aside, an account that refuses stops the step and is said", () => {
+  const partners = readFileSync("src/lib/partners.ts", "utf8");
+  const step = partners.slice(partners.indexOf("export async function draftPartners"), partners.indexOf("/** Their brand"));
+  // The same ten creators were picked every hour for ten days: nothing moved them on.
+  assert.match(step, /a\.status = 'partner' or \(a\.status = 'draft_failed' and a\.updated_at < now\(\) - make_interval\(days => \$\{SET_ASIDE_DAYS\}\)\)/);
+  assert.match(step, /if \(kind === "item"\) \{[\s\S]{0,200}await setAside\(t\.id, why\);/);
+  assert.match(step, /if \(kind === "account"\) await recordRefusal\("creator emails", why\);/);
+  assert.match(step, /t && !stopped && deadline/, "a refused account stops the step instead of trying every creator");
+  const pipeline = readFileSync("src/lib/pipeline.ts", "utf8");
+  const drafts = pipeline.slice(pipeline.indexOf("export async function draftSome"), pipeline.indexOf("export async function backfillFollowUps"));
+  assert.match(drafts, /a\.status = 'researched' or \(a\.status = 'draft_failed' and a\.updated_at < now\(\) - make_interval\(days => \$\{SET_ASIDE_DAYS\}\) and c\.source not like 'partner:%'\)/);
+  assert.match(drafts, /catch \(e\) \{\s*if \(failureKind\(e\) === "item"\) \{\s*await setAside\(c\.id,/, "a writer that throws is no longer swallowed by pool");
+  assert.match(drafts, /if \(kind === "account"\) await recordRefusal\("agency emails", why\);/);
+  assert.match(drafts, /\(\) => stopped !== null,/, "and the pool stops taking agencies once it is stopped");
+  assert.match(pipeline, /left\(deadline\) > 90_000 && !stop\?\.\(\)/);
+  const health = readFileSync("src/lib/model-health.ts", "utf8");
+  assert.match(health, /status: "draft_failed"/);
+  assert.match(health, /type: "draft\.failed", payload: \{ why:/, "why it was set aside is kept");
+  assert.match(health, /const told = before\?\.at && Date\.now\(\) - new Date\(before\.at\)\.getTime\(\) < 24 \* 3_600_000;/, "the owner is told once a day, not every hour");
+  const summary = readFileSync("src/lib/summary.ts", "utf8");
+  assert.match(summary, /Nothing is being written\./);
+  assert.match(summary, /status = 'draft_failed'\)::int set_aside/);
+  assert.match(readFileSync("src/app/dashboard/page.tsx", "utf8"), /\{refused && \(/);
 });
 
 console.log(`\n${passed} checks passed`);

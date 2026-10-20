@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import { pausedState } from "@/lib/control";
 import { waitingDrafts } from "@/lib/pipeline";
 import { dayNumbers, recentProblems, weeklyResultsHtml } from "@/lib/summary";
+import { currentRefusal } from "@/lib/model-health";
 import { dashboardAction, isOwner, logIn } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     );
   }
 
-  const [paused, n, next, problems, weekly] = await Promise.all([pausedState(), dayNumbers(), waitingDrafts(), recentProblems(), weeklyResultsHtml()]);
+  const [paused, n, next, problems, weekly, refused] = await Promise.all([pausedState(), dayNumbers(), waitingDrafts(), recentProblems(), weeklyResultsHtml(), currentRefusal()]);
   const replies = (await db().execute(sql`
     select r.received_at, r.classification, r.body, a.name agency
     from replies r join contacts c on c.id = r.contact_id join agencies a on a.id = c.agency_id
@@ -53,6 +54,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </form>
       </div>
 
+      {/* Ten days of nothing written looked, here, like a quiet week. */}
+      {refused && (
+        <div style={{ ...card, background: "#fdecec" }}>
+          <strong>⛔ Nothing is being written.</strong> The writing model refused our account ({refused.step}, {when(refused.at)}):{" "}
+          {refused.message}. Top it up or fix the key; drafting starts again on the next run.
+        </div>
+      )}
+
       <div style={{ ...card, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         {[
           ["Sent (24h)", n.sent],
@@ -67,6 +76,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           ["Signed up", n.total_signups],
           ["To research", n.to_research],
           ["Failed the check", n.needs_review],
+          ["Set aside (draft failed)", n.set_aside],
           ["YouTube channels found", n.yt_found],
           ["TikTok accounts found", n.tt_found],
           ["Creators (free white-label, 40%)", n.yt_partners],

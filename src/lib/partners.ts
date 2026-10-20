@@ -12,6 +12,8 @@ import { PARTNER_FACTS } from "./offer";
 import { claimLink, makeSample, PlatformError, shortClaimUrl, type Sample } from "./platform";
 import { isTikTok, readTikTok } from "./creators";
 import { channels } from "./youtube";
+import { failureKind, SET_ASIDE_DAYS } from "./failure-rules";
+import { recordRefusal, setAside } from "./model-health";
 
 /**
  * The creator offer, for every YouTube or TikTok creator we qualify (agency, educator,
@@ -117,24 +119,43 @@ ok is false if the first email does not make the offer plain (their own white-la
 export async function draftPartners(limit: number, log: Log, deadline = Infinity) {
   const todo = (await db().execute(sql`
     select c.id from contacts c join agencies a on a.id = c.agency_id
-    where c.source like 'partner:%' and c.email_status = 'valid' and a.status = 'partner'
+    where c.source like 'partner:%' and c.email_status = 'valid'
+      -- A creator set aside after a failed draft gets another go a week later.
+      and (a.status = 'partner' or (a.status = 'draft_failed' and a.updated_at < now() - make_interval(days => ${SET_ASIDE_DAYS})))
       and not exists (select 1 from messages m where m.contact_id = c.id and m.stopped_at is null)
       and not exists (select 1 from suppression s where s.email = c.email or s.domain = a.domain)
     order by c.created_at
     limit ${limit}`)) as unknown as { id: string }[];
   const tally: Record<string, number> = {};
+  // Why the step stopped early, when it did (failure-rules.ts).
+  let stopped: string | null = null;
   // Three at a time: each is an audit, a sequence written and checked (a minute or two).
   const queue = [...todo];
   await Promise.all(
     Array.from({ length: 3 }, async () => {
-      for (let t = queue.shift(); t && deadline - Date.now() > 240_000; t = queue.shift()) {
-        const r = await draftPartner(t.id).catch((e: unknown) => ({ why: e instanceof Error ? e.message : String(e) }));
-        const k = "why" in r ? `failed (${r.why.slice(0, 80)})` : r.passed ? "queued" : "needs_review";
-        tally[k] = (tally[k] ?? 0) + 1;
+      for (let t = queue.shift(); t && !stopped && deadline - Date.now() > 240_000; t = queue.shift()) {
+        try {
+          const r = await draftPartner(t.id);
+          const k = r.passed ? "queued" : "needs_review";
+          tally[k] = (tally[k] ?? 0) + 1;
+        } catch (e) {
+          const why = e instanceof Error ? e.message : String(e);
+          const kind = failureKind(e);
+          if (kind === "item") {
+            // This creator's own problem: set aside, so the ones behind it get their turn.
+            await setAside(t.id, why);
+            tally["set aside"] = (tally["set aside"] ?? 0) + 1;
+          } else {
+            // Ours (the account) or the moment's: the next creator would fail the same way.
+            if (!stopped) stopped = `${kind}: ${why.slice(0, 200)}`;
+            if (kind === "account") await recordRefusal("creator emails", why);
+          }
+        }
       }
     }),
   );
   if (todo.length) log(`creator emails: ${JSON.stringify(tally)}`);
+  if (stopped) log(`creator emails stopped, ${stopped}`);
 }
 
 /** Their brand: the channel's or account's profile picture as logo, their site's theme colour if they have a site. */
