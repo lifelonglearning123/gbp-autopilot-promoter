@@ -135,7 +135,12 @@ export function draftProblems(d: { subject: string; body: string }, previewUrl: 
 /* ── Creator partners: first email + three follow-ups ─────────────────── */
 
 export type PartnerEmails = { subject: string; body: string; body_2: string; body_3: string; body_4: string };
-export const PARTNER_MAX_WORDS = { body: 140, body_2: 80, body_3: 110, body_4: 60 } as const;
+// The writer is asked for 80-130 words and often lands at 141-148: a whole
+// second writer and checker round was being spent on a few words (2026-11-08).
+export const PARTNER_MAX_WORDS = { body: 160, body_2: 80, body_3: 110, body_4: 60 } as const;
+
+/** Terms the creator offer does not have, which a follow-up must not invent (the model checks only the first email). */
+const NOT_OUR_TERMS = /\b(payouts?|paid out|cookies?|bonus(es)?|tiers?|capped|caps?)\b|(keep|hold|save) (a|your) (spot|place)|spots? left|limited (spots|places|time)/i;
 
 /**
  * Rules a creator sequence must pass before any model judges it: the offer
@@ -161,6 +166,12 @@ export function partnerProblems(p: PartnerEmails, links: { claimUrl: string; pre
     if (words > PARTNER_MAX_WORDS[key]) problems.push(`${key} is ${words} words (max ${PARTNER_MAX_WORDS[key]})`);
     if (linksIn(body).some((l) => !ours.has(l))) problems.push(`${key} has a link that is not the claim link or the audit`);
     if (/\{\{|\}\}|\[(first ?name|name|channel|link)\]/i.test(body)) problems.push(`${key} has an unfilled placeholder`);
+    if (key !== "body") {
+      if (NOT_OUR_TERMS.test(body)) problems.push(`${key} states terms the offer does not have (payouts, bonuses, tiers, scarcity)`);
+      const pct = (body.match(/\d+(\.\d+)?\s?%/g) ?? []).filter((p) => !/^40\s?%$/.test(p));
+      const money = (body.match(/[£$]\s?\d+(\.\d+)?/g) ?? []).filter((m) => !/^[£$]\s?(49|19\.60)$/.test(m));
+      if (pct.length || money.length) problems.push(`${key} has a number the offer does not (${[...pct, ...money].join(", ")})`);
+    }
   }
   const first = (p.body ?? "").trim();
   if (!/white[- ]label/i.test(first)) problems.push('the first email does not say "white-label"');

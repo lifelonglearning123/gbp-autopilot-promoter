@@ -92,7 +92,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix: string = attempt > 0 ? `\n\nYour previous drafts:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
     // If the writer cannot be reached, the template follow-ups stand in rather than leaving the lead without any.
-    const written = await askJson<FollowUps>({ model: contact.writerModel ?? env.WRITER_MODELS.split(",")[0].trim(), system: forMarket(WRITER, marketOf(agency.country)), user: brief + fix, maxTokens: 1200 }).catch(
+    const written = await askJson<FollowUps>({ model: contact.writerModel ?? env.WRITER_MODELS.split(",")[0].trim(), step: "follow-ups", system: forMarket(WRITER, marketOf(agency.country)), user: brief + fix, maxTokens: 1200 }).catch(
       (e: unknown) => {
         notes = [`writer unavailable: ${e instanceof Error ? e.message : e}`];
         return null;
@@ -108,6 +108,7 @@ export async function draftFollowUps(contactId: string): Promise<FollowUpOutcome
     if (notes.length === 0) {
       const checked = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
+        step: "follow-ups check",
         system: forMarket(CHECKER, marketOf(agency.country)),
         user: `${brief}\n\nThe follow-ups:\n${JSON.stringify(draft, null, 1)}`,
         maxTokens: 600,

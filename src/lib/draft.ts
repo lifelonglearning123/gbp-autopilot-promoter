@@ -192,7 +192,7 @@ ${channel}` : "",
   let notes: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix: string = attempt > 0 ? `\n\nYour previous draft:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
-    const written = await askJson<Draft>({ model: o.writer, system: forMarket(WRITER, marketOf(o.agency.country)), user: brief + fix, maxTokens: 800 });
+    const written = await askJson<Draft>({ model: o.writer, step: "agency email", system: forMarket(WRITER, marketOf(o.agency.country)), user: brief + fix, maxTokens: 800 });
     cost += written.usage.costUsd ?? 0;
     draft = { subject: String(written.data.subject ?? "").trim(), body: String(written.data.body ?? "").trim() };
 
@@ -200,6 +200,7 @@ ${channel}` : "",
     if (notes.length === 0) {
       const checked = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
+        step: "agency email check",
         system: forMarket(CHECKER, marketOf(o.agency.country)),
         user: `${brief}\n\nThe email:\nSubject: ${draft.subject}\n\n${draft.body}`,
         maxTokens: 600,

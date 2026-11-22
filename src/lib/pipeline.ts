@@ -18,6 +18,7 @@ import { contactsFromSites, discoverHighLevel } from "./highlevel";
 import { closeAnsweredTasks, discoverCreators, discoverTikTok, enrichCreators, qualifyCreators, queueTasks } from "./creators";
 import { syncCreatorsToGhl } from "./ghl-crm";
 import { draftPartners, handOverPartners } from "./partners";
+import { backlogFull } from "./backlog";
 import { draftSecondWarmNotes, draftWarmNotes, scheduleCheckIns, sendDueNotes, stopClaimed, writeDueCheckIns } from "./tracks";
 
 /**
@@ -160,6 +161,11 @@ export async function researchSome(limit: number, deadline: number, log: Log) {
 }
 
 export async function draftSome(limit: number, deadline: number, log: Log) {
+  const held = await backlogFull(false);
+  if (held) {
+    log(held);
+    return;
+  }
   const todo = (await db().execute(sql`
     select distinct on (a.id) c.id
     from agencies a join contacts c on c.agency_id = a.id
@@ -342,6 +348,7 @@ export async function handleReplies(log: Log) {
     try {
       const { data } = await askJson<{ kind: string; confidence: number; summary: string }>({
         model: env.ANALYSIS_MODEL,
+        step: "reply sort",
         system: SORTER,
         user: r.body.slice(0, 4000),
         maxTokens: 300,
@@ -450,7 +457,7 @@ export async function hourlyRun(budgetMs: number) {
       await step("verify", () => verifySome(50, deadline, log));
       await step("GHL tags", () => tagSome(40, deadline, log));
       // YouTube and TikTok creators: find, sort, collect details, hand over, write DMs, into GHL.
-      await step("youtube details", () => enrichCreators(15, log));
+      await step("youtube details", () => enrichCreators(30, log, deadline));
       await step("youtube find", () => discoverCreators(log));
       await step("tiktok find", () => discoverTikTok(log));
       await step("youtube qualify", () => qualifyCreators(20, log));

@@ -13,7 +13,8 @@ import { bodyHtml, foldVerdict, webhookSecretOk } from "../src/lib/instantly";
 import { foldGhlVerdict, TAG_NOT_VERIFIED, TAG_VERIFIED, verificationTag } from "../src/lib/ghl";
 import { actionLink, signatureOk } from "../src/lib/links";
 import { followUpProblems, templateFollowUps } from "../src/lib/draft-rules";
-import { emailsIn, instagramHandle, messageLink, phonesIn, sortLinks, tiktokHandle, tiktokProfile } from "../src/lib/creator-rules";
+import { emailsIn, instagramHandle, messageLink, phonesIn, reachable, ruleSkip, sortLinks, tiktokHandle, tiktokProfile } from "../src/lib/creator-rules";
+import { callCost } from "../src/lib/openrouter";
 import { sequenceSteps } from "../src/lib/instantly";
 import { countryOf, draftProblems, partnerProblems, pickSampleTarget, sameBusiness, sampleTargets, townOf } from "../src/lib/draft-rules";
 
@@ -380,6 +381,73 @@ check("a draft that fails is set aside, an account that refuses stops the step a
   assert.match(summary, /Nothing is being written\./);
   assert.match(summary, /status = 'draft_failed'\)::int set_aside/);
   assert.match(readFileSync("src/app/dashboard/page.tsx", "utf8"), /\{refused && \(/);
+});
+
+console.log("\nModel cost (2026-11-08)");
+check("every call says how hard to think, low unless asked, and is kept with its step", () => {
+  const client = readFileSync("src/lib/openrouter.ts", "utf8");
+  assert.match(client, /const effort = opts\.effort \?\? "low";/, "Moonshot's default is max: never leave it unset");
+  assert.match(client, /reasoning_effort: effort,/);
+  assert.match(client, /reasoning: \{ effort \},/);
+  assert.match(client, /type: "model\.usage"/);
+  assert.match(readFileSync("src/lib/research.ts", "utf8"), /effort: "high"/, "research alone thinks harder");
+  for (const f of ["research", "brief", "draft", "followups", "partners", "creators", "pipeline", "tracks"]) {
+    const src = readFileSync(`src/lib/${f}.ts`, "utf8");
+    const calls = src.split("askJson<").length - 1;
+    const named = (src.match(/askJson<[\s\S]{0,260}?\bstep\b/g) ?? []).length;
+    assert.equal(named, calls, `${f}.ts: every model call names its step`);
+  }
+});
+check("cost comes from the provider when it says, else from the list prices", () => {
+  assert.equal(callCost({ promptTokens: 1000, cachedTokens: 0, completionTokens: 1000, reported: 0.5 }), 0.5);
+  // Defaults: $3 in, $0.30 cached, $15 out per million.
+  assert.equal(Math.round(callCost({ promptTokens: 1_000_000, cachedTokens: 500_000, completionTokens: 100_000, reported: null }) * 100) / 100, 3.15);
+});
+check("a spent daily budget stops the step for the day; it is nobody's fault", () => {
+  assert.equal(failureKind(new Error("Model daily budget reached: $10.02 of $10 spent today (MODEL_DAILY_USD).")), "temporary");
+});
+check("creators are skipped by rule before any model reads them", () => {
+  const skip = ["IN", "BR"];
+  const v = (t: string) => [{ title: t }];
+  assert.equal(ruleSkip({ country: "IN", description: "Local SEO tips", recentVideos: v("GBP") }, skip), "rule: country IN");
+  assert.equal(ruleSkip({ country: "us", description: "Local SEO tips for plumbers and roofers", recentVideos: v("Rank on maps") }, skip), null);
+  assert.equal(
+    ruleSkip({ country: null, description: "गूगल बिजनेस प्रोफाइल कैसे बनाएं और रैंक करें पूरी जानकारी हिंदी में", recentVideos: v("लोकल एसईओ टिप्स") }, skip),
+    "rule: not written in English",
+  );
+  assert.equal(ruleSkip({ country: null, description: "", recentVideos: [] }, skip), null, "too little text says nothing");
+});
+check("only a creator we could reach is worth a model call", () => {
+  assert.equal(reachable({ emails: [{}], links: {}, phones: [] }), "email");
+  assert.equal(reachable({ emails: [], links: { instagram: "https://instagram.com/jo" }, phones: [] }), "dm");
+  assert.equal(reachable({ emails: [], links: { tiktok: "https://tiktok.com/@jo" }, phones: [] }), "dm");
+  assert.equal(reachable({ emails: [], links: { youtube: "https://youtube.com/channel/x", website: "https://jo.com" }, phones: [] }), null);
+  const creators = readFileSync("src/lib/creators.ts", "utf8");
+  assert.match(creators, /const ready = env\.DMS_PER_DAY > 0 \? \["to_qualify", "dm_only"\] : \["to_qualify"\];/);
+  assert.match(creators, /export async function queueTasks[^\n]*\n  if \(dmsPerDay\(\) <= 0\) return;/, "no DMs written while they are off");
+});
+check("drafting waits while first emails pile up unsent", () => {
+  assert.match(readFileSync("src/lib/pipeline.ts", "utf8"), /export async function draftSome[^\n]*\n  const held = await backlogFull\(false\);/);
+  assert.match(readFileSync("src/lib/partners.ts", "utf8"), /export async function draftPartners[^\n]*\n  const held = await backlogFull\(true\);/);
+  assert.match(readFileSync("src/lib/backlog.ts", "utf8"), /m\.created_at > now\(\) - interval '21 days'/, "a stuck email never holds drafting for good");
+});
+check("creator follow-ups hold to the offer's terms by rule; the model reads the first email only", () => {
+  const links = { claimUrl: "https://gbp.macaws.ai/c/abc", previewUrl: null };
+  const body = `Hi Sam, your own white-label version, at no cost, 40% for life.\n\n${links.claimUrl}\n\nWorth a look?`;
+  const good = {
+    subject: "your own branded version",
+    body,
+    body_2: "Hi Sam, easy to show?",
+    body_3: `Hi Sam, £49 a month, about £19.60 to you.\n\n${links.claimUrl}`,
+    body_4: "Hi Sam, I'll stop here.",
+  };
+  assert.deepEqual(partnerProblems(good, links), []);
+  assert.deepEqual(partnerProblems({ ...good, body: `${body} ${"word ".repeat(130)}` }, links).filter((p) => p.includes("words")), [], "150 words is fine");
+  assert.ok(partnerProblems({ ...good, body_3: `${good.body_3} Payouts go out monthly.` }, links).some((p) => p.includes("terms")));
+  assert.ok(partnerProblems({ ...good, body_2: "Hi Sam, should I keep a spot open for you?" }, links).some((p) => p.includes("terms")));
+  assert.ok(partnerProblems({ ...good, body_3: `${good.body_3} That's 50% more.` }, links).some((p) => p.includes("50%")));
+  assert.ok(partnerProblems({ ...good, body_3: `${good.body_3} Up to £500 a month.` }, links).some((p) => p.includes("£500")));
+  assert.match(readFileSync("src/lib/partners.ts", "utf8"), /The email:\\nSubject: \$\{draft\.subject\}\\n\\n\$\{draft\.body\}/);
 });
 
 console.log(`\n${passed} checks passed`);

@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { pausedState } from "@/lib/control";
 import { waitingDrafts } from "@/lib/pipeline";
-import { dayNumbers, recentProblems, weeklyResultsHtml } from "@/lib/summary";
+import { dayNumbers, modelSpend, modelSpendHtml, recentProblems, weeklyResultsHtml } from "@/lib/summary";
 import { currentRefusal } from "@/lib/model-health";
 import { dashboardAction, isOwner, logIn } from "../actions";
 
@@ -28,7 +28,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     );
   }
 
-  const [paused, n, next, problems, weekly, refused] = await Promise.all([pausedState(), dayNumbers(), waitingDrafts(), recentProblems(), weeklyResultsHtml(), currentRefusal()]);
+  const [paused, n, next, problems, weekly, refused, spend] = await Promise.all([pausedState(), dayNumbers(), waitingDrafts(), recentProblems(), weeklyResultsHtml(), currentRefusal(), modelSpend()]);
   const replies = (await db().execute(sql`
     select r.received_at, r.classification, r.body, a.name agency
     from replies r join contacts c on c.id = r.contact_id join agencies a on a.id = c.agency_id
@@ -87,6 +87,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <div style={{ fontSize: 22, fontWeight: 600 }}>{v}</div>
           </div>
         ))}
+      </div>
+
+      <div style={{ ...card, background: spend.budgetUsd > 0 && spend.todayUsd >= spend.budgetUsd ? "#fff4e5" : undefined }}>
+        <h2 style={{ fontSize: 18, marginTop: 0 }}>Model spend</h2>
+        {spend.budgetUsd > 0 && spend.todayUsd >= spend.budgetUsd && (
+          <p>
+            <strong>The daily limit is reached:</strong> no model step runs again until midnight UTC. Raise MODEL_DAILY_USD to allow more.
+          </p>
+        )}
+        {/* Our own numbers with escaped step names (summary.ts). */}
+        <div style={{ overflowX: "auto" }} dangerouslySetInnerHTML={{ __html: modelSpendHtml(spend) }} />
       </div>
 
       <div style={card}>

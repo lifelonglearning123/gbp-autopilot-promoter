@@ -90,7 +90,7 @@ export async function agencyBrief(agencyId: string): Promise<Brief | null> {
   ]
     .join("\n")
     .slice(0, 40_000);
-  const { data } = await askJson<Brief>({ model: env.ANALYSIS_MODEL, system: SYSTEM, user, maxTokens: 2000 });
+  const { data } = await askJson<Brief>({ model: env.ANALYSIS_MODEL, step: "lead brief", system: SYSTEM, user, maxTokens: 2000 });
   // A point whose source is not one we gave is dropped: nothing reaches the owner unsourced.
   const allowed = new Set(sources.map((s) => s.url));
   const sourced = <T extends { source: string }>(xs: T[] | undefined) => (Array.isArray(xs) ? xs : []).filter((x) => allowed.has(x.source));

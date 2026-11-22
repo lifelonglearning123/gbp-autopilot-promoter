@@ -70,14 +70,15 @@ function footer(): string {
   return `\n\n${env.SENDER_SIGNOFF.replace(/\\n/g, "\n")}\n\n${legal}\nNot relevant? Reply "remove" and I will take you off this list straight away.`;
 }
 
-async function writeChecked(system: string, brief: string, allowed: string[], market: Market = "UK"): Promise<string | null> {
+async function writeChecked(step: string, system: string, brief: string, allowed: string[], market: Market = "UK"): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { data } = await askJson<{ body: string }>({ model: env.WRITER_MODELS.split(",")[0].trim(), system: forMarket(system, market), user: brief, maxTokens: 600 });
+    const { data } = await askJson<{ body: string }>({ model: env.WRITER_MODELS.split(",")[0].trim(), step, system: forMarket(system, market), user: brief, maxTokens: 600 });
     const body = String(data.body ?? "").trim();
     const links = (body.match(/https?:\/\/\S+/g) ?? []).map((l) => l.replace(/[).,;:!?]+$/, ""));
     if (!body || body.split(/\s+/).length > 100 || links.some((l) => !allowed.includes(l)) || /\{\{|\}\}/.test(body)) continue;
     const { data: check } = await askJson<{ ok: boolean; notes: string[] }>({
       model: env.ANALYSIS_MODEL,
+      step: `${step} check`,
       system: forMarket(CHECKER, market),
       user: `${brief}\n\nThe email:\n${body}`,
       maxTokens: 400,
@@ -130,7 +131,7 @@ export async function draftWarmNotes(log: Log) {
       .limit(1);
     const claim = shortClaimUrl(sample) ?? sample.previewUrl;
     const brief = `First name: ${t.first_name ?? "(unknown)"}\nAgency: ${t.agency}\nResearch: ${research?.summary ?? ""}\nThe audit sent: "${result.title}", score ${result.score}/100.\nClaim link: ${claim}`;
-    const body = await writeChecked(WARM, brief, [claim, sample.previewUrl], marketOf(t.country));
+    const body = await writeChecked("warm note", WARM, brief, [claim, sample.previewUrl], marketOf(t.country));
     if (!body) {
       log(`warm note for ${t.agency}: writer failed the check twice, skipped`);
       continue;
@@ -193,7 +194,7 @@ export async function draftSecondWarmNotes(log: Log) {
       `Claim link: ${claim}`,
       `The earlier note:\n${t.first_note}`,
     ].join("\n");
-    const body = await writeChecked(WARM_2, brief, [claim, sample.previewUrl], marketOf(t.country));
+    const body = await writeChecked("second warm note", WARM_2, brief, [claim, sample.previewUrl], marketOf(t.country));
     if (!body) {
       log(`second warm note for ${t.agency}: writer failed the check twice, skipped`);
       continue;
@@ -277,7 +278,7 @@ export async function writeDueCheckIns(log: Log) {
     limit 10`)) as unknown as { id: string; contact_id: string; first_name: string | null; agency: string; country: string | null; their_reply: string | null }[];
   for (const t of due) {
     const brief = `First name: ${t.first_name ?? "(unknown)"}\nAgency: ${t.agency}\nTheir earlier reply: ${(t.their_reply ?? "").slice(0, 800)}`;
-    const body = await writeChecked(CHECK_IN, brief, [], marketOf(t.country));
+    const body = await writeChecked("check-in", CHECK_IN, brief, [], marketOf(t.country));
     if (!body) continue;
     await db()
       .update(messages)

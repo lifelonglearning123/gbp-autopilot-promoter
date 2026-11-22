@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { messageLink } from "@/lib/creator-rules";
-import { DMS_PER_DAY } from "@/lib/creators";
+import { dmsPerDay } from "@/lib/creators";
 import { isOwner, queueAction } from "../actions";
 import { CopyOpen } from "./copy-open";
 
@@ -74,7 +74,7 @@ export default async function Queue({ searchParams }: { searchParams: Promise<Re
     <main style={{ maxWidth: 560, margin: "24px auto", padding: "0 12px", fontFamily: "Arial, sans-serif", color: "#1d1f24" }}>
       <h1 style={{ fontSize: 22, marginBottom: 4 }}>DM queue</h1>
       <p style={{ color: "#5b5f6b", marginTop: 0 }}>
-        {n.due} to send now · {n.later} coming up · <b>{n.sent_today} sent today</b> (aim for about {DMS_PER_DAY}; Instagram allows 20–30 cold DMs a day) ·{" "}
+        {n.due} to send now · {n.later} coming up · <b>{n.sent_today} sent today</b> {dmsPerDay() > 0 ? `(aim for about ${dmsPerDay()}; Instagram allows 20–30 cold DMs a day)` : "(no new DMs are being written: DMS_PER_DAY is 0)"} ·{" "}
         <a href="/dashboard">dashboard</a>
       </p>
       <p style={{ margin: "8px 0 4px" }}>

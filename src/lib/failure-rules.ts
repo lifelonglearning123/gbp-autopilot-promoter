@@ -23,7 +23,7 @@ export type FailureKind = "account" | "temporary" | "item";
 const ACCOUNT =
   /insufficient balance|insufficient credits?|exceeded_current_quota|quota exceeded|exceeded your (current )?quota|account (is )?suspended|is suspended|billing|payment required|invalid (api )?key|incorrect api key|is not set\./i;
 /** Worth trying again in an hour. */
-const TEMPORARY = /rate limit|too many requests|timed? ?out|aborted|fetch failed|econnreset|enotfound|socket hang up|overloaded|temporarily|unavailable|bad gateway/i;
+const TEMPORARY = /daily budget|rate limit|too many requests|timed? ?out|aborted|fetch failed|econnreset|enotfound|socket hang up|overloaded|temporarily|unavailable|bad gateway/i;
 
 export function failureKind(e: unknown): FailureKind {
   const message = e instanceof Error ? e.message : String(e ?? "");

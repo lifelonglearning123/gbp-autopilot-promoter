@@ -1,7 +1,8 @@
 /**
  * Pure rules for YouTube creators' public contact details, pinned by
  * scripts/verify.ts: links sorted by network, emails and phone numbers read
- * from text, and the link a person taps to message them.
+ * from text, the link a person taps to message them, and who is worth a
+ * model call at all.
  */
 
 export type LinkKind = "instagram" | "skool" | "linktree" | "x" | "linkedin" | "facebook" | "tiktok" | "youtube" | "calendar" | "website";
@@ -132,4 +133,31 @@ export function tiktokProfile(html: string): TikTokProfile | null {
   } catch {
     return null;
   }
+}
+
+/* ── Before any model reads a creator (2026-11-08, for cost) ──────────── */
+
+/**
+ * Why a creator is skipped by rule alone, or null: a country our offer is not
+ * sold in (63-100% of those were skipped by the model anyway), or a channel
+ * written mostly in a non-Latin script (the model skips non-English).
+ */
+export function ruleSkip(
+  c: { country: string | null; description: string | null; recentVideos: { title: string }[] },
+  skipCountries: string[],
+): string | null {
+  const country = (c.country ?? "").trim().toUpperCase();
+  if (country && skipCountries.includes(country)) return `rule: country ${country}`;
+  const text = `${c.description ?? ""} ${c.recentVideos.map((v) => v.title).join(" ")}`;
+  const letters = text.match(/\p{L}/gu) ?? [];
+  const latin = text.match(/\p{Script=Latin}/gu) ?? [];
+  if (letters.length >= 40 && latin.length / letters.length < 0.6) return "rule: not written in English";
+  return null;
+}
+
+/** How we could reach them: an email, or only a DM (Instagram, Skool, TikTok profile, or a phone), or not at all. */
+export function reachable(c: { emails: unknown[]; links: Record<string, string>; phones: unknown[] }): "email" | "dm" | null {
+  if (c.emails.length > 0) return "email";
+  if (c.links.instagram || c.links.skool || c.links.tiktok || c.phones.length > 0) return "dm";
+  return null;
 }

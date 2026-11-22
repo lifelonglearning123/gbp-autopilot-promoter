@@ -81,6 +81,9 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
 
   const { data: facts, usage } = await askJson<Facts>({
     model: env.ANALYSIS_MODEL,
+    step: "research",
+    // Fit and facts decide who is written to: worth more thought than the rest.
+    effort: "high",
     system: SYSTEM,
     user: `Agency: ${agency.name}\nWebsite: ${site}\n\n${pagesForModel}`,
     maxTokens: 1500,

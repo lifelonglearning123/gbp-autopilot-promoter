@@ -41,6 +41,42 @@ export async function dayNumbers() {
   return n;
 }
 
+/** Model calls and dollars by step: today (UTC) and the last 7 days, from the model.usage events. */
+export async function modelSpend(): Promise<{
+  todayUsd: number;
+  budgetUsd: number;
+  steps: { step: string; calls_today: number; usd_today: number; calls_7d: number; usd_7d: number; out_tokens_per_call: number }[];
+}> {
+  const midnight = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+  const steps = (await db().execute(sql`
+    select payload->>'step' step,
+      count(*) filter (where at >= ${midnight}::timestamptz)::int calls_today,
+      coalesce(sum((payload->>'usd')::numeric) filter (where at >= ${midnight}::timestamptz), 0)::float usd_today,
+      count(*)::int calls_7d,
+      coalesce(sum((payload->>'usd')::numeric), 0)::float usd_7d,
+      coalesce(round(avg((payload->>'completion')::numeric)), 0)::int out_tokens_per_call
+    from events where type = 'model.usage' and at > now() - interval '7 days'
+    group by 1 order by usd_7d desc`)) as unknown as {
+    step: string;
+    calls_today: number;
+    usd_today: number;
+    calls_7d: number;
+    usd_7d: number;
+    out_tokens_per_call: number;
+  }[];
+  return { todayUsd: steps.reduce((t, s) => t + Number(s.usd_today), 0), budgetUsd: env.MODEL_DAILY_USD, steps };
+}
+
+export function modelSpendHtml(m: Awaited<ReturnType<typeof modelSpend>>): string {
+  if (m.steps.length === 0) return "<p>No model calls in the last 7 days.</p>";
+  const usd = (v: number) => `$${Number(v).toFixed(2)}`;
+  const cell = "padding:2px 12px 2px 0";
+  return `<p>Today (UTC): <b>${usd(m.todayUsd)}</b>${m.budgetUsd > 0 ? ` of the ${usd(m.budgetUsd)} daily limit` : " (no daily limit)"}.</p>
+  <table style="border-collapse:collapse;font-size:14px"><tr style="color:#555"><td style="${cell}">Step</td><td style="${cell}">Calls today</td><td style="${cell}">Today</td><td style="${cell}">Calls, 7 days</td><td style="${cell}">7 days</td><td style="${cell}">Output tokens a call</td></tr>
+  ${m.steps.map((s) => `<tr><td style="${cell}">${esc(s.step ?? "?")}</td><td style="${cell}">${s.calls_today}</td><td style="${cell}">${usd(s.usd_today)}</td><td style="${cell}">${s.calls_7d}</td><td style="${cell}">${usd(s.usd_7d)}</td><td style="${cell}">${s.out_tokens_per_call}</td></tr>`).join("")}
+  </table>`;
+}
+
 export async function recentProblems(): Promise<string[]> {
   const runs = (await db().execute(sql`
     select payload->'lines' lines from events where source = 'bot' and type = 'run' and at > now() - interval '24 hours'`)) as unknown as { lines: string[] | null }[];
@@ -53,6 +89,7 @@ export async function dailySummaryHtml(): Promise<{ subject: string; html: strin
   const next = (await waitingDrafts()).filter((d) => !d.hold_until || new Date(d.hold_until).getTime() < Date.now() + 24 * 3_600_000);
   const problems = await recentProblems();
   const refused = await currentRefusal();
+  const spend = await modelSpend();
   const dash = `${(env.APP_URL ?? "").replace(/\/$/, "")}/dashboard`;
   const row = (label: string, v: number | string) => `<tr><td style="padding:2px 16px 2px 0;color:#555">${label}</td><td><b>${v}</b></td></tr>`;
 
@@ -78,6 +115,8 @@ export async function dailySummaryHtml(): Promise<{ subject: string; html: strin
   <h3>YouTube and TikTok creators</h3>
   <table>${row("YouTube channels found (new in 24h)", `${n.yt_found} (${n.yt_new})`)}${row("TikTok accounts found (new in 24h)", `${n.tt_found} (${n.tt_new})`)}${row("Creators for the creator offer (free white-label, 40% for life)", n.yt_partners)}${row("Creators emailed so far", n.partners_emailed)}${row("DMs and calls due now", n.dms_due)}${row("DMs sent in 24h", n.dms_sent)}</table>
   ${n.dms_due ? `<p><a href="${dash.replace(/\/dashboard$/, "/queue")}">Open the DM queue (${n.dms_due} due)</a></p>` : ""}
+  <h3>Model spend</h3>
+  ${modelSpendHtml(spend)}
   <h3>Going out next (${next.length})</h3>
   <p style="color:#555">These go into the campaign once their 24-hour hold ends, unless you stop them.</p>
   ${nextList}

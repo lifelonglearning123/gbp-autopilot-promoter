@@ -33,6 +33,21 @@ const schema = z.object({
   /** Kimi direct (platform.moonshot.ai). When set, moonshotai/* models skip OpenRouter. */
   MOONSHOT_API_KEY: optional,
   MOONSHOT_BASE_URL: z.string().default("https://api.moonshot.ai/v1"),
+  /**
+   * Model spend a day (UTC), in US dollars. Once passed, every model step stops
+   * until the next day; nothing is set aside for it. 0 turns the limit off.
+   */
+  MODEL_DAILY_USD: z.coerce.number().default(10),
+  /** Price per million tokens, for providers that do not report cost (Moonshot direct). Kimi K3 list prices. */
+  MODEL_PRICE_IN: z.coerce.number().default(3),
+  MODEL_PRICE_CACHED: z.coerce.number().default(0.3),
+  MODEL_PRICE_OUT: z.coerce.number().default(15),
+  /** Creators a day given DM and call messages. 0 (the default) writes none, and creators with no email are not qualified. */
+  DMS_PER_DAY: z.coerce.number().default(0),
+  /** Countries whose creators are skipped by rule, before any model reads them (ISO codes, comma-separated). */
+  CREATOR_SKIP_COUNTRIES: z.string().default("IN,PK,BD,BR,DE,ES,ID,MX,AR,CO,FR,IT,TR,RU,VN,TH,JP,KR,CN,EG"),
+  /** First emails written but not yet sent, per track (agencies, creators), past which no more are drafted. */
+  DRAFT_BACKLOG: z.coerce.number().default(60),
   INSTANTLY_API_KEY: optional,
   /** Our tag in the shared Instantly workspace: only mailboxes carrying it are ours. */
   INSTANTLY_TAG: z.string().default("Signal"),

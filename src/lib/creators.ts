@@ -2,7 +2,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { controls, creators, messages, outreachTasks, replies } from "@/db/schema";
 import { env } from "@/env";
-import { emailsIn, hostOf, instagramHandle, phonesIn, sortLinks, tiktokHandle, tiktokProfile, type TikTokProfile } from "./creator-rules";
+import { emailsIn, hostOf, instagramHandle, phonesIn, reachable, ruleSkip, sortLinks, tiktokHandle, tiktokProfile, type TikTokProfile } from "./creator-rules";
 import { PARTNER_FACTS } from "./offer";
 import { findWebsite, searchTikTok } from "./dataforseo";
 import { askJson } from "./openrouter";
@@ -12,9 +12,11 @@ import { channels, recentUploads, searchVideos, videoDescriptions } from "./yout
 /**
  * YouTube creators posting about local SEO / Google Business Profile:
  *   discover   search recent videos, keep new English channels
+ *   enrich     skip by rule (country, script), then public contact details
+ *              from the description, website and link page; a creator we
+ *              could not reach is never shown to a model (2026-11-08, for cost)
  *   qualify    the analysis model: agency/freelancer (a buyer), educator or
  *              business-owner audience (partners for the 40% offer), or skip
- *   enrich     public contact details from the description, website and link page
  *   hand over  a creator with an email gets the creator offer (partners.ts)
  *   tasks      Instagram / Skool / phone messages for a person to send
  * Every detail keeps where it was published (CASL asks for proof of source).
@@ -155,13 +157,16 @@ fit_score: how likely they would resell white-label GBP management to local clie
 Judge only from what is given.`;
 
 export async function qualifyCreators(limit: number, log: Log) {
-  const todo = await db().select().from(creators).where(eq(creators.status, "new")).orderBy(asc(creators.createdAt)).limit(limit);
+  // Enriched first, with a way to reach them: an email, or a DM route while DMs are written.
+  const ready = env.DMS_PER_DAY > 0 ? ["to_qualify", "dm_only"] : ["to_qualify"];
+  const todo = await db().select().from(creators).where(inArray(creators.status, ready)).orderBy(asc(creators.createdAt)).limit(limit);
   const tally: Record<string, number> = {};
   // Four at a time: one by one, a batch outlasts the server's time limit.
   const queue = [...todo];
   const one = async (c: (typeof todo)[number]) => {
     const { data } = await askJson<{ kind: string; fit_score: number; uses_ghl: boolean; english: boolean; country: string | null; reason: string }>({
       model: env.ANALYSIS_MODEL,
+      step: "creator qualify",
       system: QUALIFY,
       user: `${isTikTok(c.channelId) ? "TikTok account" : "YouTube channel"}: ${c.title} (${c.handle ?? "-"}), ${c.subscribers ?? "?"} ${isTikTok(c.channelId) ? "followers" : "subscribers"}, ${c.videoCount ?? "?"} videos, country ${c.country ?? "?"}\nFound by searching: ${c.foundBy}\nDescription:\n${(c.description ?? "").slice(0, 3000)}\nRecent videos:\n${c.recentVideos.map((v) => `- ${v.title}`).join("\n")}`,
       maxTokens: 500,
@@ -170,7 +175,8 @@ export async function qualifyCreators(limit: number, log: Log) {
     const kind = !data.english ? "skip" : ["agency", "educator", "audience"].includes(data.kind) ? data.kind : "skip";
     const fit = Math.max(0, Math.min(100, Math.round(Number(data.fit_score) || 0)));
     // Educators and business-owner audiences get the partner offer; weak agency fits are not written to.
-    const status = kind === "skip" || (kind === "agency" && fit < 40) ? "skipped" : kind === "agency" ? "qualified" : kind;
+    // Contact details are already collected (enrich runs first), so an agency goes straight to "enriched".
+    const status = kind === "skip" || (kind === "agency" && fit < 40) ? "skipped" : kind === "agency" ? "enriched" : kind;
     await db()
       .update(creators)
       .set({ kind, fitScore: fit, usesGhl: !!data.uses_ghl, country: c.country ?? data.country, qualifyNotes: data.reason, status, updatedAt: new Date() })
@@ -199,15 +205,34 @@ function hrefs(page: string): string {
   return [...page.matchAll(/href=["'](https?:\/\/[^"'#]+)["']/gi)].map((m) => m[1]).join("\n");
 }
 
-export async function enrichCreators(limit: number, log: Log) {
+/**
+ * New creators, and any qualified before contact details were collected: skip
+ * by rule first, then collect their public details, then sort by how they can
+ * be reached. A new one becomes "to_qualify" (an email), "dm_only" (only a
+ * DM route; qualified once DMs are written) or "unreachable" (nothing at all).
+ * Three at a time, for at most two and a half minutes of the run.
+ */
+export async function enrichCreators(limit: number, log: Log, deadline = Infinity) {
   const todo = await db()
     .select()
     .from(creators)
-    .where(inArray(creators.status, ["qualified", "educator", "audience"]))
+    .where(
+      sql`${creators.status} in ('new', 'qualified', 'educator', 'audience') and ${creators.links} = '{}'::jsonb and jsonb_array_length(${creators.emails}) = 0`,
+    )
     .orderBy(asc(creators.updatedAt))
     .limit(limit);
-  let n = 0;
-  for (const c of todo.filter((t) => Object.keys(t.links).length === 0 && t.emails.length === 0)) {
+  const skipCountries = env.CREATOR_SKIP_COUNTRIES.split(",").map((c) => c.trim().toUpperCase()).filter(Boolean);
+  const stopAt = Math.min(deadline - 120_000, Date.now() + 150_000);
+  const tally: Record<string, number> = {};
+  const one = async (c: (typeof todo)[number]) => {
+    if (c.status === "new") {
+      const why = ruleSkip(c, skipCountries);
+      if (why) {
+        await db().update(creators).set({ kind: "skip", status: "skipped", qualifyNotes: why, updatedAt: new Date() }).where(eq(creators.id, c.id));
+        tally.skipped_by_rule = (tally.skipped_by_rule ?? 0) + 1;
+        return;
+      }
+    }
     const tiktok = isTikTok(c.channelId);
     const home = tiktok ? tiktokUrl(c.channelId) : `https://www.youtube.com/channel/${c.channelId}`;
     // YouTube: the channel description plus its recent videos' full descriptions (where the links usually are).
@@ -244,19 +269,23 @@ export async function enrichCreators(limit: number, log: Log) {
       }
     }
     const uniq = <T, K>(xs: T[], key: (x: T) => K) => xs.filter((x, i) => xs.findIndex((y) => key(y) === key(x)) === i);
+    const kept = { links, emails: uniq(emails, (e) => e.email).slice(0, 5), phones: uniq(phones, (p) => p.phone.replace(/\D/g, "")).slice(0, 3) };
+    const route = reachable(kept);
+    const status =
+      c.status === "new" ? (route === "email" ? "to_qualify" : route === "dm" ? "dm_only" : "unreachable") : c.status === "qualified" ? "enriched" : c.status;
     await db()
       .update(creators)
-      .set({
-        links,
-        emails: uniq(emails, (e) => e.email).slice(0, 5),
-        phones: uniq(phones, (p) => p.phone.replace(/\D/g, "")).slice(0, 3),
-        status: c.status === "qualified" ? "enriched" : c.status,
-        updatedAt: new Date(),
-      })
+      .set({ ...kept, status, updatedAt: new Date() })
       .where(eq(creators.id, c.id));
-    n++;
-  }
-  if (n) log(`youtube: contact details collected for ${n} creators`);
+    tally[status] = (tally[status] ?? 0) + 1;
+  };
+  const queue = [...todo];
+  await Promise.all(
+    Array.from({ length: 3 }, async () => {
+      for (let c = queue.shift(); c && Date.now() < stopAt; c = queue.shift()) await one(c).catch(() => {});
+    }),
+  );
+  if (Object.keys(tally).length) log(`creators: details collected ${JSON.stringify(tally)}`);
 }
 
 /** What the writer may say about a creator's channel, for an agency we write to. */
@@ -281,8 +310,12 @@ Return ONLY a JSON object: {"instagram": string, "skool": string, "phone_script"
 - phone_script: 60-100 words for a short call: who you are, why them (their channel), the offer in one line (their own branded version, free, 40% for life), ask whether you can email their claim link.
 UK English. No hype, no flattery, no placeholders, no terms beyond the facts given.`;
 
-/** Creators a day given DMs and calls: about what one person can send by hand. */
-export const DMS_PER_DAY = 30;
+/**
+ * Creators a day given DMs and calls (DMS_PER_DAY; Instagram allows about
+ * 20-30 cold DMs a day). Off by default since 2026-11-08: 866 were written
+ * and 7 sent, each a model call.
+ */
+export const dmsPerDay = () => env.DMS_PER_DAY;
 
 /**
  * A creator's own short claim link for DMs (creator terms, free, 40%). Creators
@@ -300,11 +333,12 @@ export async function creatorLink(c: { id: string; title: string; emails: { emai
  */
 /** Each creator is a model call (~a minute with Kimi): three at a time, and none started once the run is short of time. */
 export async function queueTasks(limit: number, log: Log, deadline = Infinity) {
+  if (dmsPerDay() <= 0) return;
   // No more creators a day than a person can message by hand (Instagram allows
   // about 20-30 cold DMs a day): the best-fitting first, the rest wait.
   const [{ today }] = (await db().execute(sql`
     select count(distinct creator_id)::int today from outreach_tasks where created_at >= date_trunc('day', now())`)) as unknown as { today: number }[];
-  const room = Math.min(limit, Math.max(0, DMS_PER_DAY - today));
+  const room = Math.min(limit, Math.max(0, dmsPerDay() - today));
   if (room === 0) return;
   const ids = (await db().execute(sql`
     select cr.id from creators cr
@@ -320,6 +354,7 @@ export async function queueTasks(limit: number, log: Log, deadline = Infinity) {
     const recent = c.recentVideos.slice(0, 4).map((v) => `- ${v.title}`).join("\n");
     const { data } = await askJson<{ instagram: string; skool: string; phone_script: string }>({
       model: env.WRITER_MODELS.split(",")[0].trim(),
+      step: "creator DMs",
       system: PARTNER_DMS,
       user: `Channel: ${c.title}
 About them: ${c.qualifyNotes ?? ""}

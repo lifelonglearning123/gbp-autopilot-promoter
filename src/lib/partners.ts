@@ -14,6 +14,7 @@ import { isTikTok, readTikTok } from "./creators";
 import { channels } from "./youtube";
 import { failureKind, SET_ASIDE_DAYS } from "./failure-rules";
 import { recordRefusal, setAside } from "./model-health";
+import { backlogFull } from "./backlog";
 
 /**
  * The creator offer, for every YouTube or TikTok creator we qualify (agency, educator,
@@ -109,14 +110,24 @@ Return ONLY a JSON object: {"subject": string, "body": string, "body_2": string,
 - body_4 (day 14): 25-55 words. A short, friendly last note: you'll stop writing; the offer stands if they reply later.
 - No sign-off or name (added later). The only links allowed are the claim link and the audit link given. No placeholders, no hype (game-changer, skyrocket, passive income machine), no flattery, no invented numbers, results or terms.`;
 
-const CHECKER = `You check a cold email sequence to a YouTube or TikTok creator before it is sent, against the facts, the channel details and the audit given.
-True facts, which the emails may state:
+/**
+ * The model checks the first email only (2026-11-08, for cost): it carries the
+ * offer, the channel and the audit. The follow-ups are short and held to rules
+ * (partnerProblems: lengths, links, no terms or numbers beyond the offer's).
+ */
+const CHECKER = `You check the first cold email to a YouTube or TikTok creator before it is sent, against the facts, the channel details and the audit given.
+True facts, which the email may state:
 ${PARTNER_FACTS}
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
-ok is false if the first email does not make the offer plain (their own white-label GBP Autopilot in their brand, at no cost, 40% of what the businesses pay, for life); any email states terms or facts not given (payout schedule, bonuses, results), misreads the audit, misdescribes their channel, is pushy, guilt-tripping, flattering or hype-y, reads as a template, or would embarrass the sender. notes: short, specific fixes (empty when ok).`;
+ok is false if it does not make the offer plain (their own white-label GBP Autopilot in their brand, at no cost, 40% of what the businesses pay, for life); states terms or facts not given (payout schedule, bonuses, results); misreads the audit; misdescribes their channel; is pushy, flattering or hype-y; reads as a template; or would embarrass the sender. notes: short, specific fixes (empty when ok).`;
 
 /** Each creator can take minutes (a sample audit, writing, checking): stops while the run still has time to finish. */
 export async function draftPartners(limit: number, log: Log, deadline = Infinity) {
+  const held = await backlogFull(true);
+  if (held) {
+    log(held);
+    return;
+  }
   const todo = (await db().execute(sql`
     select c.id from contacts c join agencies a on a.id = c.agency_id
     where c.source like 'partner:%' and c.email_status = 'valid'
@@ -247,7 +258,7 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
   let notes: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const fix = attempt > 0 ? `\n\nYour previous draft:\n${JSON.stringify(draft)}\nFix these problems:\n- ${notes.join("\n- ")}` : "";
-    const { data } = await askJson<PartnerEmails>({ model: writer, system: WRITER, user: brief + fix, maxTokens: 1500 });
+    const { data } = await askJson<PartnerEmails>({ model: writer, step: "creator email", system: WRITER, user: brief + fix, maxTokens: 1500 });
     draft = {
       subject: String(data.subject ?? "").trim(),
       body: String(data.body ?? "").trim(),
@@ -259,8 +270,9 @@ async function draftPartner(contactId: string): Promise<{ passed: boolean }> {
     if (notes.length === 0) {
       const { data: check } = await askJson<{ ok: boolean; notes: string[] }>({
         model: env.ANALYSIS_MODEL,
+        step: "creator email check",
         system: CHECKER,
-        user: `${brief}\n\nThe emails:\n${JSON.stringify(draft, null, 1)}`,
+        user: `${brief}\n\nThe email:\nSubject: ${draft.subject}\n\n${draft.body}`,
         maxTokens: 600,
       });
       notes = check.ok ? [] : (check.notes ?? ["checker said no, without notes"]);
