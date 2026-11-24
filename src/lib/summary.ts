@@ -30,6 +30,7 @@ export async function dayNumbers() {
       (select count(*) from messages where pushed_at is null and not coalesce((guardrail->>'ok')::boolean, false) and stopped_at is null)::int needs_review,
       (select count(*) from agencies where status = 'new')::int to_research,
       (select count(*) from agencies where status = 'draft_failed')::int set_aside,
+      (select count(*) from agencies where status = 'parked')::int parked,
       (select count(*) from creators where channel_id not like 'tiktok:%')::int yt_found,
       (select count(*) from creators where channel_id like 'tiktok:%')::int tt_found,
       (select count(*) from creators where channel_id like 'tiktok:%' and created_at > now() - interval '24 hours')::int tt_new,

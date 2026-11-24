@@ -382,4 +382,22 @@ check("a draft that fails is set aside, an account that refuses stops the step a
   assert.match(readFileSync("src/app/dashboard/page.tsx", "utf8"), /\{refused && \(/);
 });
 
+console.log("Research on the local model");
+check("research runs on the PC: the cron leaves new agencies, 30-39 parks, 40+ goes on to drafting", () => {
+  const pipeline = readFileSync("src/lib/pipeline.ts", "utf8");
+  const step = pipeline.slice(pipeline.indexOf("export async function researchSome"), pipeline.indexOf("export async function draftSome"));
+  assert.match(step, /if \(env\.RESEARCH_ON === "local"\) return;/, "Vercel cannot reach the PC's model, and must not fall back to Kimi");
+  assert.match(readFileSync("src/env.ts", "utf8"), /RESEARCH_ON: z\.enum\(\["local", "kimi"\]\)\.default\("local"\)/);
+  const research = readFileSync("src/lib/research.ts", "utf8");
+  assert.match(research, /export const FIT_FLOOR = 40;/);
+  assert.match(research, /export const PARK_FLOOR = 30;/);
+  assert.match(research, /if \(!isAgency\) return "skipped";\s*if \(fit >= FIT_FLOOR\) return "researched";\s*return fit >= PARK_FLOOR \? "parked" : "skipped";/);
+  assert.match(research, /const status = statusFor\(Boolean\(facts\.is_agency\), fit\);/);
+  assert.match(research, /opts\.local\s*\? await askLocalJson<Facts>\(SYSTEM \+ LOCAL_SCORING, user\)/, "the scoring addendum is for the local model only");
+  // Parked agencies are never drafted: drafting takes 'researched' only.
+  assert.doesNotMatch(pipeline.slice(pipeline.indexOf("export async function draftSome")), /'parked'/);
+  const script = readFileSync("scripts/research.ts", "utf8");
+  assert.match(script, /researchAgency\(a\.id, \{ local: !kimi \}\)/, "the script is local unless --kimi");
+});
+
 console.log(`\n${passed} checks passed`);

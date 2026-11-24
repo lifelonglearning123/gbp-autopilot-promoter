@@ -4,6 +4,7 @@ import { agencies, agencyResearch, contacts } from "@/db/schema";
 import { env } from "@/env";
 import { crawlSite } from "./crawl";
 import { countryFromLocation } from "./crawl-rules";
+import { askLocalJson } from "./ollama";
 import { askJson } from "./openrouter";
 
 /**
@@ -18,6 +19,18 @@ import { askJson } from "./openrouter";
  */
 
 export const FIT_FLOOR = 40;
+/**
+ * 30-39: not good enough to write to yet, not a clear no either. Kept as
+ * "parked", with the page text, to come back to later (the local model parks
+ * many real agencies on 35 when it is unsure).
+ */
+export const PARK_FLOOR = 30;
+
+export function statusFor(isAgency: boolean, fit: number): "researched" | "parked" | "skipped" {
+  if (!isAgency) return "skipped";
+  if (fit >= FIT_FLOOR) return "researched";
+  return fit >= PARK_FLOOR ? "parked" : "skipped";
+}
 
 export type Facts = {
   trading_name: string | null;
@@ -55,11 +68,28 @@ brand_colour_guess (hex like "#1a73e8" or null).
 
 Fit score rubric: 80-100 sells local SEO/GBP to local businesses and already resells tools; 60-79 local-business marketing, likely to add GBP work; 40-59 general digital agency with some local clients; 0-39 not an agency, enterprise-only, ecommerce-only, or no local work. Judge only from the pages. Never invent clients or facts; use empty arrays, false and null when the pages do not say.`;
 
+/**
+ * Added for the local model only. Tested 2026-11-23 on 111 agencies Kimi had
+ * scored (scripts/local-prompt-test.ts, "v3"): it never passed one Kimi
+ * rejected, and the agencies it is unsure of land on 30-39, which park.
+ */
+const LOCAL_SCORING = `
+
+How to apply the fit score. Work through these in order and stop at the first that applies:
+1. NOT AN AGENCY (a coach, consultant, trainer, course, accountant, IT support firm, software product sold direct, a single shop or trade business): 0-19, whatever else it says.
+2. AN AGENCY WHOSE CLIENTS ARE MAINLY LOCAL BUSINESSES scores AT LEAST 45, even if it only sells social media, ads, lead generation, funnels or websites. Any of these counts as evidence: named local clients or case studies; a stated focus on trades, contractors, home improvement, salons, clinics, dentists, vets, restaurants, gyms, estate agents or similar; the agency's own name or headline naming such a sector (e.g. "Home Improvement Marketing", "Dental Marketing Co"); or saying it serves businesses in its own town, county or region.
+   - Add 10-15 when it already sells something next to GBP work: Google reviews or reputation, lead generation for local trades, websites with care plans, or any white-label software (a GoHighLevel/HighLevel SaaS counts).
+   - It already sells local SEO or Google Business Profile work: use the rubric's 60-100 bands.
+3. ANY OTHER REAL AGENCY (services listed, business clients, nothing showing they are local): 35-45.
+4. AN AGENCY PAGE WITH ALMOST NOTHING ON IT (a name, a bio, a holding page): 20-35.
+GBP Autopilot is a NEW service an agency adds, so not doing GBP work yet is not a reason to score low. Use the whole range and do not default to 30 or 35. Decide is_agency, niches and case_study_clients first, then the score.`;
+
 export type ResearchOutcome =
   | { ok: true; fitScore: number; status: string; version: number; costUsd: number | null }
   | { ok: false; why: string };
 
-export async function researchAgency(agencyId: string): Promise<ResearchOutcome> {
+/** local: ask the model on this PC (free) instead of Kimi. Only scripts on the PC pass it. */
+export async function researchAgency(agencyId: string, opts: { local?: boolean } = {}): Promise<ResearchOutcome> {
   const [agency] = await db().select().from(agencies).where(eq(agencies.id, agencyId)).limit(1);
   if (!agency) return { ok: false, why: "no such agency" };
   const site = agency.website || (agency.domain.startsWith("email:") ? null : agency.domain);
@@ -79,12 +109,10 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
     .join("\n\n")
     .slice(0, 28_000);
 
-  const { data: facts, usage } = await askJson<Facts>({
-    model: env.ANALYSIS_MODEL,
-    system: SYSTEM,
-    user: `Agency: ${agency.name}\nWebsite: ${site}\n\n${pagesForModel}`,
-    maxTokens: 1500,
-  });
+  const user = `Agency: ${agency.name}\nWebsite: ${site}\n\n${pagesForModel}`;
+  const { data: facts, usage } = opts.local
+    ? await askLocalJson<Facts>(SYSTEM + LOCAL_SCORING, user).then((r) => ({ data: r.data, usage: { model: r.model, costUsd: 0 } }))
+    : await askJson<Facts>({ model: env.ANALYSIS_MODEL, system: SYSTEM, user, maxTokens: 1500 });
   // The page code shows GoHighLevel even where the text never names it.
   if (crawl.ghl.some((g) => g.trace !== "mentions HighLevel")) facts.uses_gohighlevel = true;
   const fit = Math.max(0, Math.min(100, Math.round(Number(facts.fit_score) || 0)));
@@ -108,7 +136,7 @@ export async function researchAgency(agencyId: string): Promise<ResearchOutcome>
   });
 
   const colour = crawl.themeColour ?? (/^#[0-9a-f]{6}$/i.test(facts.brand_colour_guess ?? "") ? facts.brand_colour_guess : null);
-  const status = !facts.is_agency || fit < FIT_FLOOR ? "skipped" : "researched";
+  const status = statusFor(Boolean(facts.is_agency), fit);
   // Agencies found by their site (not from a list) start named after their domain; the brand goes on the sample audit.
   const tradingName = (facts.trading_name ?? "").trim();
   const rename = agency.name === agency.domain && tradingName.length >= 2 && tradingName.length <= 60;

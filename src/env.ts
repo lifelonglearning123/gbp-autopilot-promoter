@@ -28,6 +28,12 @@ const schema = z.object({
   OPENROUTER_API_KEY: optional,
   /** Research, reply sorting, draft checking, weekly review. Kimi direct, for cost. */
   ANALYSIS_MODEL: z.string().default("moonshotai/kimi-k3"),
+  /**
+   * Where agency research runs. "local": on the owner's PC with the local model
+   * (npm run research:local, run by the PC's idle task), so the cron leaves new
+   * agencies for it. "kimi": the cron researches them with ANALYSIS_MODEL.
+   */
+  RESEARCH_ON: z.enum(["local", "kimi"]).default("local"),
   /** The copywriters, comma-separated; two or more are compared head to head. Kimi only, for cost. */
   WRITER_MODELS: z.string().default("moonshotai/kimi-k3"),
   /** Kimi direct (platform.moonshot.ai). When set, moonshotai/* models skip OpenRouter. */

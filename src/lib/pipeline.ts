@@ -149,6 +149,8 @@ export async function tagSome(limit: number, deadline: number, log: Log) {
 }
 
 export async function researchSome(limit: number, deadline: number, log: Log) {
+  // Research runs on the owner's PC (local model, no cost); new agencies wait for it.
+  if (env.RESEARCH_ON === "local") return;
   const todo = await db().select({ id: agencies.id }).from(agencies).where(eq(agencies.status, "new")).orderBy(asc(agencies.createdAt)).limit(limit);
   const tally: Record<string, number> = {};
   await pool(todo, 3, deadline, async (a) => {
