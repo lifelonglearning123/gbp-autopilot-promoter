@@ -20,7 +20,7 @@ import type { Facts } from "./research";
  * either way; the agency moves to "queued" only when the draft passed.
  */
 
-const WRITER = `You write the first cold email from GBP Autopilot to a marketing agency that runs on GoHighLevel.
+export const WRITER = `You write the first cold email from GBP Autopilot to a marketing agency that runs on GoHighLevel.
 ${OFFER_FACTS}
 
 What we offer them, which the reader must understand by the end of the email: a white-label service for auditing and optimising local businesses' Google Business Profiles, which the agency sells to its own local clients under its own brand. We do the work; the agency's name is on it and it keeps the client relationship. We already ran one audit for them, in their brand, as a demonstration of what their clients would get.
@@ -35,7 +35,7 @@ Return ONLY a JSON object: {"subject": string, "body": string}.
 - No sign-off or name (the signature is added later), no other links, no prices unless it fits naturally, no placeholders, no flattery, no hype words (revolutionary, game-changer, skyrocket).
 - Use only facts given below. Never invent clients, numbers, or results.`;
 
-const CHECKER = `You check a cold email before it is sent. Compare it with the research and the audit it was written from.
+export const CHECKER = `You check a cold email before it is sent. Compare it with the research and the audit it was written from.
 True facts about our offer, which the email may state:
 ${OFFER_FACTS}
 Return ONLY a JSON object: {"ok": boolean, "notes": string[]}.
@@ -154,8 +154,7 @@ type Contact = typeof contacts.$inferSelect;
 type Agency = typeof agencies.$inferSelect;
 type Research = typeof agencyResearch.$inferSelect;
 
-/** Write the first email around an audit and check it: rules, then the analysis model; one rewrite. */
-async function writeFirst(o: {
+type FirstInput = {
   contact: Contact;
   agency: Agency;
   research: Research;
@@ -163,11 +162,13 @@ async function writeFirst(o: {
   kind: string;
   result: SampleResult;
   previewUrl: string;
-  writer: string;
-}): Promise<{ draft: Draft; notes: string[]; cost: number }> {
+};
+
+/** What the writer and the checker are told: the research, the audit and its link. */
+export async function firstBrief(o: FirstInput): Promise<string> {
   const { contact, agency, research, facts, result } = o;
   const channel = await creatorContext(agency.id);
-  const brief = [
+  return [
     `First name: ${contact.firstName?.trim() || "(unknown)"}`,
     `Agency: ${agency.name} (${agency.website ?? agency.domain})`,
     `Research: ${research.summary ?? ""}`,
@@ -186,7 +187,11 @@ ${channel}` : "",
   ]
     .filter((l) => l !== "")
     .join("\n");
+}
 
+/** Write the first email around an audit and check it: rules, then the analysis model; one rewrite. */
+async function writeFirst(o: FirstInput & { writer: string }): Promise<{ draft: Draft; notes: string[]; cost: number }> {
+  const brief = await firstBrief(o);
   let cost = 0;
   let draft: Draft = { subject: "", body: "" };
   let notes: string[] = [];
